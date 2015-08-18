@@ -1,0 +1,118 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Imapbackup-svn] r14 - trunk
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/imapbackup-svn/2005-June/index.html" >
+   <LINK REL="made" HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r14%20-%20trunk&In-Reply-To=%3C200506022117.j52LHq0j023891%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000011.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Imapbackup-svn] r14 - trunk</H1>
+    <B>Rico Schiekel at BerliOS</B> 
+    <A HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r14%20-%20trunk&In-Reply-To=%3C200506022117.j52LHq0j023891%40sheep.berlios.de%3E"
+       TITLE="[Imapbackup-svn] r14 - trunk">fire at sheep.berlios.de
+       </A><BR>
+    <I>Thu Jun  2 23:17:52 CEST 2005</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000011.html">[Imapbackup-svn] r15 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#10">[ date ]</a>
+              <a href="thread.html#10">[ thread ]</a>
+              <a href="subject.html#10">[ subject ]</a>
+              <a href="author.html#10">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: fire
+Date: 2005-06-02 23:17:52 +0200 (Thu, 02 Jun 2005)
+New Revision: 14
+
+Modified:
+   trunk/imapbackup.py
+Log:
+- fix bug in syslog code
+- fix command line parameter '-l' handling
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-05-31 21:39:08 UTC (rev 13)
++++ trunk/imapbackup.py	2005-06-02 21:17:52 UTC (rev 14)
+@@ -40,7 +40,7 @@
+ 
+     def __init__(self):
+         self.__logger = logging.getLogger('imapbackup')
+-        self.__formatter = logging.Formatter('%(asctime)s %(message)s')
++        self.__formatter = logging.Formatter('imapbackup: %(message)s')
+         self.__handlers = []
+ 
+     def __add_handler(self, handler):
+@@ -82,7 +82,8 @@
+         &quot;&quot;&quot;
+         if exclusive:
+             self.remove_all_handlers()
+-        handler = logging.handlers.SysLogHandler()
++        handler = logging.handlers.SysLogHandler(address='/dev/log',\
++            facility=logging.handlers.SysLogHandler.LOG_SYSLOG)
+         handler.setFormatter(self.__formatter)
+         self.__add_handler(handler)
+ 
+@@ -651,7 +652,7 @@
+         &quot;&quot;&quot;
+         try:
+             opts, args = getopt.getopt(sys.argv[1:], \
+-                &quot;ha:c:l:&quot;, \
++                &quot;ha:c:l&quot;, \
+                 [&quot;help&quot;, &quot;account=&quot;, &quot;config-file=&quot;, &quot;list-folders&quot;])
+         except getopt.GetoptError, e:
+             print('error: %s' % e)
+@@ -681,13 +682,13 @@
+     def __config_logger(self, account):
+         &quot;&quot;&quot;Configures the logger singelton for the given account.
+         &quot;&quot;&quot;
++        Log().set_log_level(self.__config.get_log_level(account))
+         Log().remove_all_handlers()
+         for logger in self.__config.get_logger(account).split(', '):
+             if str.lower(logger) == 'syslog':
+                 Log().log_to_syslog()
+             elif str.lower(logger) == 'file':
+                 Log().log_to_file(self.__config.get_log_file(account))
+-        Log().set_log_level(self.__config.get_log_level(account))
+ 
+     def run(self):
+         if self.__list_folders:
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000011.html">[Imapbackup-svn] r15 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#10">[ date ]</a>
+              <a href="thread.html#10">[ thread ]</a>
+              <a href="subject.html#10">[ subject ]</a>
+              <a href="author.html#10">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/imapbackup-svn">More information about the Imapbackup-svn
+mailing list</a><br>
+</body></html>

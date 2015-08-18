@@ -1,0 +1,519 @@
+From fire at sheep.berlios.de  Thu Jun  2 23:17:52 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Thu, 2 Jun 2005 23:17:52 +0200
+Subject: [Imapbackup-svn] r14 - trunk
+Message-ID: <200506022117.j52LHq0j023891@sheep.berlios.de>
+
+Author: fire
+Date: 2005-06-02 23:17:52 +0200 (Thu, 02 Jun 2005)
+New Revision: 14
+
+Modified:
+   trunk/imapbackup.py
+Log:
+- fix bug in syslog code
+- fix command line parameter '-l' handling
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-05-31 21:39:08 UTC (rev 13)
++++ trunk/imapbackup.py	2005-06-02 21:17:52 UTC (rev 14)
+@@ -40,7 +40,7 @@
+ 
+     def __init__(self):
+         self.__logger = logging.getLogger('imapbackup')
+-        self.__formatter = logging.Formatter('%(asctime)s %(message)s')
++        self.__formatter = logging.Formatter('imapbackup: %(message)s')
+         self.__handlers = []
+ 
+     def __add_handler(self, handler):
+@@ -82,7 +82,8 @@
+         """
+         if exclusive:
+             self.remove_all_handlers()
+-        handler = logging.handlers.SysLogHandler()
++        handler = logging.handlers.SysLogHandler(address='/dev/log',\
++            facility=logging.handlers.SysLogHandler.LOG_SYSLOG)
+         handler.setFormatter(self.__formatter)
+         self.__add_handler(handler)
+ 
+@@ -651,7 +652,7 @@
+         """
+         try:
+             opts, args = getopt.getopt(sys.argv[1:], \
+-                "ha:c:l:", \
++                "ha:c:l", \
+                 ["help", "account=", "config-file=", "list-folders"])
+         except getopt.GetoptError, e:
+             print('error: %s' % e)
+@@ -681,13 +682,13 @@
+     def __config_logger(self, account):
+         """Configures the logger singelton for the given account.
+         """
++        Log().set_log_level(self.__config.get_log_level(account))
+         Log().remove_all_handlers()
+         for logger in self.__config.get_logger(account).split(', '):
+             if str.lower(logger) == 'syslog':
+                 Log().log_to_syslog()
+             elif str.lower(logger) == 'file':
+                 Log().log_to_file(self.__config.get_log_file(account))
+-        Log().set_log_level(self.__config.get_log_level(account))
+ 
+     def run(self):
+         if self.__list_folders:
+
+
+
+From fire at sheep.berlios.de  Fri Jun  3 14:51:26 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Fri, 3 Jun 2005 14:51:26 +0200
+Subject: [Imapbackup-svn] r15 - trunk
+Message-ID: <200506031251.j53CpQic012374@sheep.berlios.de>
+
+Author: fire
+Date: 2005-06-03 14:51:26 +0200 (Fri, 03 Jun 2005)
+New Revision: 15
+
+Modified:
+   trunk/TODO
+Log:
+update todo list
+
+Modified: trunk/TODO
+===================================================================
+--- trunk/TODO	2005-06-02 21:17:52 UTC (rev 14)
++++ trunk/TODO	2005-06-03 12:51:26 UTC (rev 15)
+@@ -2,11 +2,6 @@
+ | TODO
+ `----
+   - a lot more docu ;)
+-  - comand line parameter parser
+-    - -c --config-file   read from given config file
+-    - -l --list-folders  list imap folders
+-    - --log-level        set log level (info, warn, error, none)
+   - maildir write should move existing file from 'new' to 'cur' and
+     fix flags in the filename
+-  - add threading
+   - remove maildir directories, which are deleted in the imap box
+
+
+
+From fire at sheep.berlios.de  Fri Jun  3 14:52:52 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Fri, 3 Jun 2005 14:52:52 +0200
+Subject: [Imapbackup-svn] r16 - trunk
+Message-ID: <200506031252.j53CqqO2012429@sheep.berlios.de>
+
+Author: fire
+Date: 2005-06-03 14:52:52 +0200 (Fri, 03 Jun 2005)
+New Revision: 16
+
+Modified:
+   trunk/imapbackup.py
+Log:
+- fix log formaters
+- add command line parameter --threads
+- add account based threading support
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-06-03 12:51:26 UTC (rev 15)
++++ trunk/imapbackup.py	2005-06-03 12:52:52 UTC (rev 16)
+@@ -30,6 +30,7 @@
+ import ConfigParser
+ import logging, logging.handlers
+ import getopt
++import threading
+ 
+ message_deliver_count = 0
+ 
+@@ -40,7 +41,8 @@
+ 
+     def __init__(self):
+         self.__logger = logging.getLogger('imapbackup')
+-        self.__formatter = logging.Formatter('imapbackup: %(message)s')
++        self.__syslog_formatter = logging.Formatter('%(name)s: [%(levelname)s] %(message)s')
++        self.__file_formatter = logging.Formatter('%(asctime)s %(name)s: [%(levelname)s] %(message)s')
+         self.__handlers = []
+ 
+     def __add_handler(self, handler):
+@@ -71,7 +73,7 @@
+             if exclusive:
+                 self.remove_all_handlers()
+             handler = logging.FileHandler(os.path.expanduser(fname))
+-            handler.setFormatter(self.__formatter)
++            handler.setFormatter(self.__file_formatter)
+             self.__add_handler(handler)
+ 
+     def log_to_syslog(self, exclusive=False):
+@@ -84,7 +86,7 @@
+             self.remove_all_handlers()
+         handler = logging.handlers.SysLogHandler(address='/dev/log',\
+             facility=logging.handlers.SysLogHandler.LOG_SYSLOG)
+-        handler.setFormatter(self.__formatter)
++        handler.setFormatter(self.__syslog_formatter)
+         self.__add_handler(handler)
+ 
+     def debug(self, msg):
+@@ -635,6 +637,7 @@
+         self.__config_file = '~/.imapbackuprc'
+         self.__list_folders = False
+         self.__account = 'all'
++        self.__threads = 1
+ 
+         self.__parse_cmdl()
+         self.__init_config()
+@@ -646,6 +649,7 @@
+         print('     -a --account         select an account (def: all)')
+         print('     -c --config-file     use another config file (def: ~/.imapbackuprc)')
+         print('     -l --list-folders    list folders in selected accounts')
++        print('        --threads         number of account handling threads (def: 1)')
+ 
+     def __parse_cmdl(self):
+         """
+@@ -653,7 +657,7 @@
+         try:
+             opts, args = getopt.getopt(sys.argv[1:], \
+                 "ha:c:l", \
+-                ["help", "account=", "config-file=", "list-folders"])
++                ["help", "account=", "config-file=", "list-folders", "threads="])
+         except getopt.GetoptError, e:
+             print('error: %s' % e)
+             self.__show_syntax()
+@@ -668,6 +672,8 @@
+                 self.__config_file = arg
+             elif opt in ("-l", "--list-folders"):
+                 self.__list_folders = True
++            elif opt in ("--threads"):
++                self.__threads = int(arg)
+ 
+     def __init_config(self):
+         """Initialize the configuration.
+@@ -726,9 +732,33 @@
+             Log().error('error: ' % e)
+ 
+     def backup_all(self):
+-        for account in self.__config.get_accounts():
+-            self.backup(account)
++        thr_max = self.__threads
++        accounts = self.__config.get_accounts()
++        if len(accounts) < thr_max:
++            thr_max = len(accounts)
+ 
++        # thread class
++        class BackupThread(threading.Thread):
++            def __init__(self, worker, account_list):
++                threading.Thread.__init__(self)
++                self.__worker = worker
++                self.__account_list = account_list
++            def run(self):
++                for account in self.__account_list:
++                    self.__worker.backup(account)
++
++        # start threads
++        btlist = []
++        for thr_idx in range(thr_max):
++            bt = BackupThread(self, accounts[thr_idx::thr_max])
++            bt.start()
++            btlist.append(bt)
++
++        # wait for all threads to finish
++        for bt in btlist:
++            bt.join()
++    
++
+     def backup(self, account):
+         try:
+             self.__config_logger(account)
+
+
+
+From fire at sheep.berlios.de  Mon Jun  6 17:50:37 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Mon, 6 Jun 2005 17:50:37 +0200
+Subject: [Imapbackup-svn] r17 - trunk
+Message-ID: <200506061550.j56Fob3J026754@sheep.berlios.de>
+
+Author: fire
+Date: 2005-06-06 17:50:37 +0200 (Mon, 06 Jun 2005)
+New Revision: 17
+
+Modified:
+   trunk/imapbackuprc.example
+Log:
+add logging to stderr
+
+Modified: trunk/imapbackuprc.example
+===================================================================
+--- trunk/imapbackuprc.example	2005-06-03 12:52:52 UTC (rev 16)
++++ trunk/imapbackuprc.example	2005-06-06 15:50:37 UTC (rev 17)
+@@ -19,7 +19,7 @@
+ #    - imapport       imap port (default: 993)
+ #    - imapssl        use imap ssl (default: true)
+ #    - imapfilter     filter imap folders (default: no filtering)
+-#    - logger         set logger (default: syslog)
++#    - logger         set logger (default: stderr)
+ #    - logfile        file to log to, if filelogger is select
+ #    - loglevel       set logging level (default: error)
+ #
+@@ -47,7 +47,6 @@
+ 
+ maildir:        ~/Maildir_1
+ 
+-logger:         syslog
+ loglevel:       warn
+ 
+ 
+@@ -62,7 +61,7 @@
+ 
+ maildir:        ~/Maildir_2
+ 
+-logger:         file, syslog
++logger:         file, syslog, stderr
+ logfile:        ~/.imapbackup.log
+ loglevel:       debug
+ 
+
+
+
+From fire at sheep.berlios.de  Mon Jun  6 17:51:19 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Mon, 6 Jun 2005 17:51:19 +0200
+Subject: [Imapbackup-svn] r18 - trunk
+Message-ID: <200506061551.j56FpJAL026824@sheep.berlios.de>
+
+Author: fire
+Date: 2005-06-06 17:51:16 +0200 (Mon, 06 Jun 2005)
+New Revision: 18
+
+Modified:
+   trunk/imapbackup.py
+Log:
+- add logging to stderr
+- add maildir folder removing
+- simplify header hashing
+- fix bug in maildir index removing
+- fix logging bug in worker
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-06-06 15:50:37 UTC (rev 17)
++++ trunk/imapbackup.py	2005-06-06 15:51:16 UTC (rev 18)
+@@ -31,6 +31,7 @@
+ import logging, logging.handlers
+ import getopt
+ import threading
++import shutil
+ 
+ message_deliver_count = 0
+ 
+@@ -63,6 +64,18 @@
+             self.__logger.removeHandler(h)
+         self.__handlers = []
+ 
++    def log_to_stderr(self, exclusive=False):
++        """Make the logger to log to stderr.
++
++        If the parameter 'exclusive' is True, than all other log handlers
++        are removed.
++        """
++        if exclusive:
++            self.remove_all_handlers()
++        handler = logging.StreamHandler(sys.stderr)
++        handler.setFormatter(self.__file_formatter)
++        self.__add_handler(handler)
++
+     def log_to_file(self, fname, exclusive=False):
+         """Make the logger to log to a file.
+ 
+@@ -115,15 +128,6 @@
+         return self
+ 
+     def __init__(self):
+-        self.__regex_from = re.compile('^from: .*$', re.IGNORECASE)
+-        self.__regex_to = re.compile('^to: .*$', re.IGNORECASE)
+-        self.__regex_subject = re.compile('^subject: .*$', re.IGNORECASE)
+-        self.__regex_msgid = re.compile('^message-id: .*$', re.IGNORECASE)
+-        self.__regex_date = re.compile('^date: .*$', re.IGNORECASE)
+-        self.__regex_received = re.compile('^received: .*$', re.IGNORECASE)
+-        self.__regex_xorgto = re.compile('^x-original-to: .*$', re.IGNORECASE)
+-        self.__regex_delivto = re.compile('^delivered-to: .*$', re.IGNORECASE)
+-        self.__regex_returnpath = re.compile('^return-path: .*$', re.IGNORECASE)
+         self.__regex_msg_seen = re.compile('.*\Seen.*')
+         self.__regex_msg_answerd = re.compile('.*\Answered.*')
+         self.__regex_msg_flagged = re.compile('.*\Flagged.*')
+@@ -139,24 +143,7 @@
+             if len(line) == 0:
+                 # only scan the header
+                 break
+-            if self.__regex_from.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_to.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_subject.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_msgid.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_date.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_received.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_xorgto.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_delivto.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_returnpath.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
++            hd_obj.update(self.__regex_whitespaces.sub('', line))
+         return hd_obj
+ 
+     def gen_filename(self):
+@@ -297,7 +284,7 @@
+         try:
+             return self.__cparser.get(account, self.__LOGGER)
+         except:
+-            return 'syslog'
++            return 'stderr'
+ 
+     def get_log_file(self, account):
+         """Return file to log to.
+@@ -433,6 +420,7 @@
+     def __init__(self, basedir=None, create=False):
+         self.__basedir=''
+         self.__sha1_header_cache={}
++        self.__touched_folders=[]
+         if basedir:
+             self.open(basedir, create)
+ 
+@@ -470,6 +458,9 @@
+         return False
+ 
+ 
++    def touch_folder(self, folder):
++        self.__touched_folders.append(folder)
++
+     def create_folder(self, folder):
+         """Create a new maildir folder.
+ 
+@@ -478,6 +469,7 @@
+         if not folder.startswith(self.__basedir):
+             folder = os.path.join(self.__basedir, folder)
+ 
++        self.touch_folder(folder)
+         return self.__create_folder(folder)
+ 
+ 
+@@ -515,16 +507,28 @@
+ 
+         if self.__sha1_header_cache.has_key(folder):
+             if self.__sha1_header_cache[folder].has_key(hd):
+-                del self.__sha1_header_cache[folder][hd]
++                if len(self.__sha1_header_cache[folder][hd]) <= 1:
++                    # remove complete hash handle
++                    del self.__sha1_header_cache[folder][hd]
++                else:
++                    # remove an entry from hash handle
++                    self.__sha1_header_cache[folder][hd] = self.__sha1_header_cache[folder][hd][1::]
+ 
+-    def remove_leftover_messages(self):
+-        """Remove files, which are leftover from updating.
++    def remove_leftover(self):
++        """Remove files or directories, which are leftover from updating.
+         """
++        # remove all leftover messages
+         for i in self.__sha1_header_cache.keys():
+             for j in self.__sha1_header_cache[i].keys():
+                 for f in self.__sha1_header_cache[i][j]:
+                     os.remove(os.path.join(i, f))
+                     Log().debug('remove message "%s"' % os.path.join(i, f))
++        
++        # remove all leftover directories
++        def f(path): return self.__touched_folders.count(path) == 0
++        for folder in filter(f, self.__sha1_header_cache.keys()):
++            shutil.rmtree(folder)
++            Log().debug('remove folder "%s"' % folder)
+ 
+     def __is_maildir_folder(self, folder):
+         """Return True if the folder is a maildir folder.
+@@ -545,7 +549,7 @@
+         if not folder.startswith(self.__basedir):
+             folder = os.path.join(self.__basedir, folder)
+ 
+-        flist = [folder]
++        flist = []
+         for fo in os.listdir(folder):
+             if os.path.isdir(os.path.join(folder,fo)) and self.__is_maildir_folder(fo):
+                 flist.append(os.path.join(folder,fo))
+@@ -690,11 +694,13 @@
+         """
+         Log().set_log_level(self.__config.get_log_level(account))
+         Log().remove_all_handlers()
+-        for logger in self.__config.get_logger(account).split(', '):
++        for logger in self.__config.get_logger(account).replace(' ', '').split(','):
+             if str.lower(logger) == 'syslog':
+                 Log().log_to_syslog()
+             elif str.lower(logger) == 'file':
+                 Log().log_to_file(self.__config.get_log_file(account))
++            elif str.lower(logger) == 'stderr':
++                Log().log_to_stderr()
+ 
+     def run(self):
+         if self.__list_folders:
+@@ -770,7 +776,7 @@
+             
+             fo_filter = self.__config.get_imapfilter(account)
+             for folder in imap.get_folders(fo_filter):
+-                # create folder if needed
++                # create and touch folder if needed
+                 cf = maildir.create_folder(folder)
+             
+                 mlist = imap.get_messages(folder)
+@@ -784,11 +790,11 @@
+                     else:
+                         maildir.remove_from_index(folder, hhd)
+ 
+-            maildir.remove_leftover_messages()
++            maildir.remove_leftover()
+         except IMAPException, e:
+-            Log().error('imap error: ' % e)
++            Log().error('imap error: %s' % str(e))
+         except Exception, e:
+-            Log().error('error: ' % e)
++            Log().error('error: %s' % str(e))
+ 
+ 
+ # ----------------------------------------------------------------------------
+
+
+
+From fire at sheep.berlios.de  Mon Jun  6 17:56:24 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Mon, 6 Jun 2005 17:56:24 +0200
+Subject: [Imapbackup-svn] r19 - trunk
+Message-ID: <200506061556.j56FuOO0027087@sheep.berlios.de>
+
+Author: fire
+Date: 2005-06-06 17:56:24 +0200 (Mon, 06 Jun 2005)
+New Revision: 19
+
+Modified:
+   trunk/TODO
+Log:
+update todo list
+
+
+Modified: trunk/TODO
+===================================================================
+--- trunk/TODO	2005-06-06 15:51:16 UTC (rev 18)
++++ trunk/TODO	2005-06-06 15:56:24 UTC (rev 19)
+@@ -4,4 +4,3 @@
+   - a lot more docu ;)
+   - maildir write should move existing file from 'new' to 'cur' and
+     fix flags in the filename
+-  - remove maildir directories, which are deleted in the imap box
+
+
+

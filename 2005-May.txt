@@ -1,0 +1,1587 @@
+From fire at sheep.berlios.de  Fri May 27 15:26:47 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Fri, 27 May 2005 15:26:47 +0200
+Subject: [Imapbackup-svn] r4 - trunk
+Message-ID: <200505271326.j4RDQltl030751@sheep.berlios.de>
+
+Author: fire
+Date: 2005-05-27 15:26:46 +0200 (Fri, 27 May 2005)
+New Revision: 4
+
+Added:
+   trunk/TODO
+   trunk/imapbackuprc.example
+Modified:
+   trunk/imapbackup.py
+Log:
+- move todo list to file 'TODO'
+- implement 'Configuration' class
+- create 'imapbackuprc' example file
+
+
+Added: trunk/TODO
+===================================================================
+--- trunk/TODO	2005-05-24 12:46:44 UTC (rev 3)
++++ trunk/TODO	2005-05-27 13:26:46 UTC (rev 4)
+@@ -0,0 +1,7 @@
++,----
++| TODO
++`----
++  - a lot more docu ;)
++  - -c --config-file   read from given config file
++  - -l --list-folders  list imap folders
++  - --log-level        set log level (info, warn, error, none)
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-05-24 12:46:44 UTC (rev 3)
++++ trunk/imapbackup.py	2005-05-27 13:26:46 UTC (rev 4)
+@@ -18,18 +18,11 @@
+ # 
+ # $Id$
+ 
+-# TODO
+-#  - more doku ;)
+-#  - ~/.imapbackuprc    config file
+-#  - -c --config-file   read from given config file
+-#  - -l --list-folders  list imap folders
+-#  - --log-level        set log level (info, warn, error, none)
+-#
+-
+ import os, sys
+ import socket, imaplib
+ import time, sha, types
+ import string, re
++import ConfigParser
+ 
+ verbose = True
+ message_deliver_count = 0
+@@ -44,6 +37,61 @@
+ def error(msg):
+     sys.exit('error: ' + str(msg))
+ 
++class Configuration:
++    def __init__(self, cfiles):
++        self.__HOST = 'host'
++        self.__PORT = 'port'
++        self.__USERNAME = 'username'
++        self.__PASSWORD = 'password'
++        self.__MAILDIR = 'maildir'
++        self.__IMAPFILTER = 'imapfilter'
++        
++        self.__cparser = ConfigParser.ConfigParser()
++
++        if type(cfiles) != types.ListType: cfiles = [cfiles]
++        def expand_user(path): return os.path.expanduser(path)
++
++        self.__cparser.read(map(expand_user, cfiles))
++
++    def get_accounts(self):
++        return self.__cparser.sections()
++
++    def get_host(self, account):
++        try:
++            return self.__cparser.get(account, self.__HOST)
++        except:
++            error('host for account %s not configured!' % account)
++
++    def get_port(self, account):
++        try:
++            return int(self.__cparser.get(account, self.__PORT))
++        except:
++            error('port for account %s not configured!' % account)
++
++    def get_username(self, account):
++        try:
++            return self.__cparser.get(account, self.__USERNAME)
++        except:
++            error('username for account %s not configured!' % account)
++
++    def get_password(self, account):
++        try:
++            return self.__cparser.get(account, self.__PASSWORD)
++        except:
++            error('password for account %s not configured!' % account)
++
++    def get_maildir(self, account):
++        try:
++            return self.__cparser.get(account, self.__MAILDIR)
++        except:
++            error('maildir for account %s not configured!' % account)
++
++    def get_imapfilter(self, account):
++        try:
++            return self.__cparser.get(account, self.__IMAPFILTER)
++        except:
++            return None
++
+ class Utils:
+     def __init__(self):
+         self.__regex_from = re.compile('^from: .*$', re.IGNORECASE)
+@@ -125,12 +173,15 @@
+ 
+ 
+ class IMAP:
+-    def __init__(self):
++    def __init__(self, host=None, port=None, user=None, password=None):
+         self.__connection = None
+         self.__regex_folderstr = re.compile('^\((.*)\) +"(.*)" +"(.*)"$')
+         self.__regex_uid = re.compile('UID (.*) BODY')
+         self.__regex_flags = re.compile('FLAGS (.*) BODY')
+ 
++        if host and port and user and password:
++            self.open(host, port, user, password)
++
+     def open(self, host, port, user, password):
+         """Try to open the imap connection.
+         """
+@@ -224,11 +275,12 @@
+ 
+ 
+ class Maildir:
+-    def __init__(self):
++    def __init__(self, basedir=None, create=False):
+         self.__basedir=''
+         self.__sha1_header_cache={}
++        if basedir:
++            self.open(basedir, create)
+ 
+-
+     def open(self, basedir, create=False):
+         """Open the maildir folder and index all existing messages.
+ 
+@@ -392,42 +444,53 @@
+         return ret
+ 
+ class Worker:
+-    def __init__(self, maildir, imap):
+-        self.__maildir = maildir
+-        self.__imap = imap
++    def __init__(self, config):
++        self.__config = config
+ 
+-    def list_imap_folders(self, filter=None):
+-        for folder in self.__imap.get_folders(filter):
++    def backup_all(self):
++        for account in self.__config.get_accounts():
++            self.backup(account)
++
++    def list_imap_folders(self, account):
++        imap = IMAP(self.__config.get_host(account),
++                    self.__config.get_port(account),
++                    self.__config.get_username(account),
++                    self.__config.get_password(account))
++
++        filter = self.__config.get_imapfilter(account)
++        for folder in imap.get_folders(filter):
+             print '-> %s' % folder
+ 
+-    def backup(self):
++    def backup(self, account):
+         utils = Utils()
+-        for folder in self.__imap.get_folders():
++        
++        maildir = Maildir(self.__config.get_maildir(account), True)
++        imap = IMAP(self.__config.get_host(account),
++                    self.__config.get_port(account),
++                    self.__config.get_username(account),
++                    self.__config.get_password(account))
++        
++        for folder in imap.get_folders():
+             # create folder if needed
+-            cf = self.__maildir.create_folder(folder)
++            cf = maildir.create_folder(folder)
+         
+-            mlist = self.__imap.get_messages(folder)
++            mlist = imap.get_messages(folder)
+             for uid, hhd in mlist.iteritems():
+-                has_msg = self.__maildir.has_message_header(folder, hhd)
++                has_msg = maildir.has_message_header(folder, hhd)
+                 if cf or not has_msg:
+                     # folder was newly created and header not in maildir index
+                     # so save message
+-                    flags, body = self.__imap.get_message(folder, uid)
+-                    self.__maildir.write_message(folder, body, flags)
++                    flags, body = imap.get_message(folder, uid)
++                    maildir.write_message(folder, body, flags)
+                 else:
+-                    self.__maildir.remove_from_index(folder, hhd)
++                    maildir.remove_from_index(folder, hhd)
+ 
+-        for fname in self.__maildir.get_leftover_messages():
++        for fname in maildir.get_leftover_messages():
+             info('[Worker] remove message "%s"' % fname)
+             os.remove(fname)
+ 
+ if __name__ == "__main__":
+-    md = Maildir()
+-    md.open(sys.argv[1], True)
+-
+-    imap = IMAP()
+-    imap.open('hhhh', 993, 'uuuu', 'pppp')
+-    
+-    w = Worker(md, imap)
+-    # w.backup()
+-    w.list_imap_folders('^INBOX')
++    cfg = Configuration('~/work/imapbackup/imapbackuprc')
++    w = Worker(cfg)
++    w.backup_all()
++    # w.list_imap_folders('')
+
+Added: trunk/imapbackuprc.example
+===================================================================
+--- trunk/imapbackuprc.example	2005-05-24 12:46:44 UTC (rev 3)
++++ trunk/imapbackuprc.example	2005-05-27 13:26:46 UTC (rev 4)
+@@ -0,0 +1,30 @@
++# $Id$
++#
++# this file contains configuration examples for imapbackup.
++#
++# the configuration file consists of sections, led by a 
++# "[section]" header and followed by "name: value" entries.
++# note that leading whitespace is removed from values.
++# lines beginning with "#" or ";" are ignored and may be used
++# to provide comments.
++#
++# imapbackup can handle multiple accounts. each account has a
++# section with a unique name. for each account, the
++#    host, port, user, password, maildir
++# entries must be given. 
++# other entries like imapfilter are optional.
++
++[account 1]
++host: imap.server
++port: 993
++username: username
++password: secret
++maildir: ~/Maildir
++imapfilter: ^INBOX
++
++[account 2]
++host: another.host
++port: 996
++username: username_2
++password: terces
++maildir: ~/Maildir_2
+
+
+
+From fire at sheep.berlios.de  Fri May 27 15:54:45 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Fri, 27 May 2005 15:54:45 +0200
+Subject: [Imapbackup-svn] r5 - trunk
+Message-ID: <200505271354.j4RDsjpu032331@sheep.berlios.de>
+
+Author: fire
+Date: 2005-05-27 15:54:45 +0200 (Fri, 27 May 2005)
+New Revision: 5
+
+Modified:
+   trunk/imapbackuprc.example
+Log:
+add property svn:keywords
+
+
+Property changes on: trunk/imapbackuprc.example
+___________________________________________________________________
+Name: svn:keywords
+   + Id
+
+
+
+From fire at sheep.berlios.de  Fri May 27 16:33:40 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Fri, 27 May 2005 16:33:40 +0200
+Subject: [Imapbackup-svn] r6 - trunk
+Message-ID: <200505271433.j4REXeOi002019@sheep.berlios.de>
+
+Author: fire
+Date: 2005-05-27 16:33:39 +0200 (Fri, 27 May 2005)
+New Revision: 6
+
+Modified:
+   trunk/imapbackup.py
+   trunk/imapbackuprc.example
+Log:
+- add 'imapssl' (bool) optional configuration option
+- rename various config options
+  - update 'Configuration' class
+  - update 'imapbackuprc.example' file
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-05-27 13:54:45 UTC (rev 5)
++++ trunk/imapbackup.py	2005-05-27 14:33:39 UTC (rev 6)
+@@ -39,12 +39,13 @@
+ 
+ class Configuration:
+     def __init__(self, cfiles):
+-        self.__HOST = 'host'
+-        self.__PORT = 'port'
+-        self.__USERNAME = 'username'
+-        self.__PASSWORD = 'password'
++        self.__IMAPHOST = 'imapserver'
++        self.__IMAPPORT = 'imapport'
++        self.__IMAPUSER = 'imapuser'
++        self.__IMAPPASSWORD = 'imappassword'
++        self.__IMAPFILTER = 'imapfilter'
++        self.__IMAPSSL = 'imapssl'
+         self.__MAILDIR = 'maildir'
+-        self.__IMAPFILTER = 'imapfilter'
+         
+         self.__cparser = ConfigParser.ConfigParser()
+ 
+@@ -54,44 +55,75 @@
+         self.__cparser.read(map(expand_user, cfiles))
+ 
+     def get_accounts(self):
++        """Return list of all accounts.
++        """
+         return self.__cparser.sections()
+ 
+     def get_host(self, account):
++        """Return imap host.
++        """
+         try:
+-            return self.__cparser.get(account, self.__HOST)
++            return self.__cparser.get(account, self.__IMAPHOST)
+         except:
+             error('host for account %s not configured!' % account)
+ 
+     def get_port(self, account):
++        """Return optional imap port.
++
++        default return value: 993
++        """
+         try:
+-            return int(self.__cparser.get(account, self.__PORT))
++            return int(self.__cparser.get(account, self.__IMAPPORT))
+         except:
+-            error('port for account %s not configured!' % account)
++            return 993
+ 
+     def get_username(self, account):
++        """Return imap username.
++        """
+         try:
+-            return self.__cparser.get(account, self.__USERNAME)
++            return self.__cparser.get(account, self.__IMAPUSER)
+         except:
+             error('username for account %s not configured!' % account)
+ 
+     def get_password(self, account):
++        """Return imap password.
++        """
+         try:
+-            return self.__cparser.get(account, self.__PASSWORD)
++            return self.__cparser.get(account, self.__IMAPPASSWORD)
+         except:
+             error('password for account %s not configured!' % account)
+ 
+     def get_maildir(self, account):
++        """Return maildir path.
++        """
+         try:
+             return self.__cparser.get(account, self.__MAILDIR)
+         except:
+             error('maildir for account %s not configured!' % account)
+ 
+     def get_imapfilter(self, account):
++        """Return optional imap filter string.
++
++        default return value: None
++        """
+         try:
+             return self.__cparser.get(account, self.__IMAPFILTER)
+         except:
+             return None
+ 
++    def use_imapssl(self, account):
++        """Return True or False for optional parameter 'imapssl'.
++
++        default return value: True
++        """
++        try:
++            if str.lower(self.__cparser.get(account, self.__IMAPSSL)) == 'false':
++                return False
++            else:
++                return True
++        except:
++            return True
++
+ class Utils:
+     def __init__(self):
+         self.__regex_from = re.compile('^from: .*$', re.IGNORECASE)
+@@ -173,20 +205,23 @@
+ 
+ 
+ class IMAP:
+-    def __init__(self, host=None, port=None, user=None, password=None):
++    def __init__(self, host=None, port=None, user=None, password=None, ssl=True):
+         self.__connection = None
+         self.__regex_folderstr = re.compile('^\((.*)\) +"(.*)" +"(.*)"$')
+         self.__regex_uid = re.compile('UID (.*) BODY')
+         self.__regex_flags = re.compile('FLAGS (.*) BODY')
+ 
+         if host and port and user and password:
+-            self.open(host, port, user, password)
++            self.open(host, port, user, password, ssl)
+ 
+-    def open(self, host, port, user, password):
++    def open(self, host, port, user, password, ssl=True):
+         """Try to open the imap connection.
+         """
+         try:
+-            self.__connection = imaplib.IMAP4_SSL(host, port)
++            if ssl:
++                self.__connection = imaplib.IMAP4_SSL(host, port)
++            else:
++                self.__connection = imaplib.IMAP4(host, port)
+             self.__connection.login(user, password)
+         except Exception, e:
+             error('can not connect to \'%s:%d\': %s' % (host, port, str(e)))
+@@ -455,7 +490,8 @@
+         imap = IMAP(self.__config.get_host(account),
+                     self.__config.get_port(account),
+                     self.__config.get_username(account),
+-                    self.__config.get_password(account))
++                    self.__config.get_password(account),
++                    self.__config.use_imapssl(account))
+ 
+         filter = self.__config.get_imapfilter(account)
+         for folder in imap.get_folders(filter):
+@@ -492,5 +528,5 @@
+ if __name__ == "__main__":
+     cfg = Configuration('~/work/imapbackup/imapbackuprc')
+     w = Worker(cfg)
+-    w.backup_all()
++    # w.backup_all()
+     # w.list_imap_folders('')
+
+Modified: trunk/imapbackuprc.example
+===================================================================
+--- trunk/imapbackuprc.example	2005-05-27 13:54:45 UTC (rev 5)
++++ trunk/imapbackuprc.example	2005-05-27 14:33:39 UTC (rev 6)
+@@ -10,21 +10,28 @@
+ #
+ # imapbackup can handle multiple accounts. each account has a
+ # section with a unique name. for each account, the
+-#    host, port, user, password, maildir
++#    - imapserver     imap server
++#    - imapuser       imap user
++#    - imappassword   imap password
++#    - maildir        path to the maildir
+ # entries must be given. 
+-# other entries like imapfilter are optional.
++# other entries are optional:
++#    - imapport       imap port (default: 993)
++#    - imapssl        use imap ssl (default: true)
++#    - imapfilter     filter imap folders (default: no filtering)
+ 
+ [account 1]
+-host: imap.server
+-port: 993
+-username: username
+-password: secret
+-maildir: ~/Maildir
+-imapfilter: ^INBOX
++imapserver:     imap.server
++imapuser:       username
++imappassword:   secret
++imapfilter:     ^INBOX
++maildir:        ~/Maildir_1
+ 
+-[account 2]
+-host: another.host
+-port: 996
+-username: username_2
+-password: terces
+-maildir: ~/Maildir_2
++[account 2 (outbox only)]
++imapserver:     another.server
++imapport:       143
++imapuser:       username_2
++imappassword:   terces
++imapssl:        false
++imapfilter:     outbox
++maildir:        ~/Maildir_2
+
+
+
+From fire at sheep.berlios.de  Sun May 29 11:56:51 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Sun, 29 May 2005 11:56:51 +0200
+Subject: [Imapbackup-svn] r7 - trunk
+Message-ID: <200505290956.j4T9upvG001460@sheep.berlios.de>
+
+Author: fire
+Date: 2005-05-29 11:56:50 +0200 (Sun, 29 May 2005)
+New Revision: 7
+
+Modified:
+   trunk/TODO
+Log:
+update todo list
+
+
+Modified: trunk/TODO
+===================================================================
+--- trunk/TODO	2005-05-27 14:33:39 UTC (rev 6)
++++ trunk/TODO	2005-05-29 09:56:50 UTC (rev 7)
+@@ -5,3 +5,9 @@
+   - -c --config-file   read from given config file
+   - -l --list-folders  list imap folders
+   - --log-level        set log level (info, warn, error, none)
++  - better logging system (debug, info, warn, error)
++     * no logging
++     * to stdout
++     * to syslog
++  - maildir write should move existing file from 'new' to 'cur' and
++    fix flags in the filename
+
+
+
+From fire at sheep.berlios.de  Sun May 29 11:59:32 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Sun, 29 May 2005 11:59:32 +0200
+Subject: [Imapbackup-svn] r8 - trunk
+Message-ID: <200505290959.j4T9xWuZ001511@sheep.berlios.de>
+
+Author: fire
+Date: 2005-05-29 11:59:31 +0200 (Sun, 29 May 2005)
+New Revision: 8
+
+Modified:
+   trunk/imapbackup.py
+Log:
+- add folder filtering to backup
+- add expand user path handling to maildir basedir
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-05-29 09:56:50 UTC (rev 7)
++++ trunk/imapbackup.py	2005-05-29 09:59:31 UTC (rev 8)
+@@ -322,7 +322,7 @@
+         If 'create' is true and 'basedir' is no maildir, than an new 
+         maildir will be created.
+         """
+-        self.__basedir = basedir
++        self.__basedir = os.path.expanduser(basedir)
+         if create == True:
+             if not os.path.isdir(self.__basedir):
+                 os.mkdir(self.__basedir)
+@@ -506,7 +506,8 @@
+                     self.__config.get_username(account),
+                     self.__config.get_password(account))
+         
+-        for folder in imap.get_folders():
++        fo_filter = self.__config.get_imapfilter(account)
++        for folder in imap.get_folders(fo_filter):
+             # create folder if needed
+             cf = maildir.create_folder(folder)
+         
+
+
+
+From fire at sheep.berlios.de  Sun May 29 18:31:39 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Sun, 29 May 2005 18:31:39 +0200
+Subject: [Imapbackup-svn] r9 - trunk
+Message-ID: <200505291631.j4TGVduE006042@sheep.berlios.de>
+
+Author: fire
+Date: 2005-05-29 18:31:38 +0200 (Sun, 29 May 2005)
+New Revision: 9
+
+Modified:
+   trunk/imapbackuprc.example
+Log:
+add logger config options and short description.
+
+
+Modified: trunk/imapbackuprc.example
+===================================================================
+--- trunk/imapbackuprc.example	2005-05-29 09:59:31 UTC (rev 8)
++++ trunk/imapbackuprc.example	2005-05-29 16:31:38 UTC (rev 9)
+@@ -19,14 +19,39 @@
+ #    - imapport       imap port (default: 993)
+ #    - imapssl        use imap ssl (default: true)
+ #    - imapfilter     filter imap folders (default: no filtering)
++#    - logger         set logger (default: syslog)
++#    - logfile        file to log to, if filelogger is select
++#    - loglevel       set logging level (default: error)
++#
++# logging:
++# with the option 'logger' one or more loggers can be specified,
++# separated with a comma.
++# but only one logger of a type is allowed for an account.
++# available loggers:
++#    - syslog         logs to syslog
++#    - file           log to a file which must be specified using
++#                     'logfile: <filename>'
++# available log levels:
++#    - debug
++#    - info
++#    - warn
++#    - error
++#    - critical
++#
+ 
+ [account 1]
+ imapserver:     imap.server
+ imapuser:       username
+ imappassword:   secret
+ imapfilter:     ^INBOX
++
+ maildir:        ~/Maildir_1
+ 
++logger:         syslog
++loglevel:       warn
++
++
++
+ [account 2 (outbox only)]
+ imapserver:     another.server
+ imapport:       143
+@@ -34,4 +59,10 @@
+ imappassword:   terces
+ imapssl:        false
+ imapfilter:     outbox
++
+ maildir:        ~/Maildir_2
++
++logger:         file, syslog
++logfile:        ~/.imapbackup.log
++loglevel:       debug
++
+
+
+
+From fire at sheep.berlios.de  Sun May 29 18:35:27 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Sun, 29 May 2005 18:35:27 +0200
+Subject: [Imapbackup-svn] r10 - trunk
+Message-ID: <200505291635.j4TGZRuk015815@sheep.berlios.de>
+
+Author: fire
+Date: 2005-05-29 18:35:26 +0200 (Sun, 29 May 2005)
+New Revision: 10
+
+Modified:
+   trunk/imapbackup.py
+Log:
+- add logger singelton
+- add logger to 'Configuration' class
+- change old info(), warn(), error() calls to Log().... calls
+- add some exception handling code
+- change class 'Utils' to singleton
+- fix some minor bugs
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-05-29 16:31:38 UTC (rev 9)
++++ trunk/imapbackup.py	2005-05-29 16:35:26 UTC (rev 10)
+@@ -18,113 +18,98 @@
+ # 
+ # $Id$
+ 
+-import os, sys
+-import socket, imaplib
+-import time, sha, types
+-import string, re
++import sys
++import os
++import socket
++import imaplib
++import time
++import sha
++import types
++import string
++import re
+ import ConfigParser
++import logging, logging.handlers
+ 
+-verbose = True
+ message_deliver_count = 0
+ 
+-def info(msg):
+-    if verbose:
+-        sys.stderr.write('info: ' + str(msg) + '\n')
++# ----------------------------------------------------------------------------
++class Log:
++    def __call__(self):
++        return self
+ 
+-def warn(msg):
+-    sys.stderr.write('warning: ' + str(msg) + '\n')
++    def __init__(self):
++        self.__logger = logging.getLogger('imapbackup')
++        self.__formatter = logging.Formatter('%(asctime)s %(message)s')
++        self.__handlers = []
+ 
+-def error(msg):
+-    sys.exit('error: ' + str(msg))
++    def __add_handler(self, handler):
++        self.__logger.addHandler(handler)
++        self.__handlers.append(handler)
+ 
+-class Configuration:
+-    def __init__(self, cfiles):
+-        self.__IMAPHOST = 'imapserver'
+-        self.__IMAPPORT = 'imapport'
+-        self.__IMAPUSER = 'imapuser'
+-        self.__IMAPPASSWORD = 'imappassword'
+-        self.__IMAPFILTER = 'imapfilter'
+-        self.__IMAPSSL = 'imapssl'
+-        self.__MAILDIR = 'maildir'
+-        
+-        self.__cparser = ConfigParser.ConfigParser()
++    def set_log_level(self, mode):
++        """Set the logging level.
+ 
+-        if type(cfiles) != types.ListType: cfiles = [cfiles]
+-        def expand_user(path): return os.path.expanduser(path)
+-
+-        self.__cparser.read(map(expand_user, cfiles))
+-
+-    def get_accounts(self):
+-        """Return list of all accounts.
++        Use logger.INFO, logger.WARN, logger.ERROR, ...
+         """
+-        return self.__cparser.sections()
++        self.__logger.setLevel(mode)
+ 
+-    def get_host(self, account):
+-        """Return imap host.
++    def remove_all_handlers(self):
++        """Remove all registered log handlers.
+         """
+-        try:
+-            return self.__cparser.get(account, self.__IMAPHOST)
+-        except:
+-            error('host for account %s not configured!' % account)
++        for h in self.__handlers:
++            self.__logger.removeHandler(h)
++        self.__handlers = []
+ 
+-    def get_port(self, account):
+-        """Return optional imap port.
++    def log_to_file(self, fname, exclusive=False):
++        """Make the logger to log to a file.
+ 
+-        default return value: 993
++        If the parameter 'exclusive' is True, than all other log handlers
++        are removed.
+         """
+-        try:
+-            return int(self.__cparser.get(account, self.__IMAPPORT))
+-        except:
+-            return 993
++        if fname not in (''):
++            if exclusive:
++                self.remove_all_handlers()
++            handler = logging.FileHandler(os.path.expanduser(fname))
++            handler.setFormatter(self.__formatter)
++            self.__add_handler(handler)
+ 
+-    def get_username(self, account):
+-        """Return imap username.
+-        """
+-        try:
+-            return self.__cparser.get(account, self.__IMAPUSER)
+-        except:
+-            error('username for account %s not configured!' % account)
++    def log_to_syslog(self, exclusive=False):
++        """Make the logger to log to syslog.
+ 
+-    def get_password(self, account):
+-        """Return imap password.
++        If the parameter 'exclusive' is True, than all other log handlers
++        are removed.
+         """
+-        try:
+-            return self.__cparser.get(account, self.__IMAPPASSWORD)
+-        except:
+-            error('password for account %s not configured!' % account)
++        if exclusive:
++            self.remove_all_handlers()
++        handler = logging.handlers.SysLogHandler()
++        handler.setFormatter(self.__formatter)
++        self.__add_handler(handler)
+ 
+-    def get_maildir(self, account):
+-        """Return maildir path.
+-        """
+-        try:
+-            return self.__cparser.get(account, self.__MAILDIR)
+-        except:
+-            error('maildir for account %s not configured!' % account)
++    def debug(self, msg):
++        self.__logger.debug(msg)
+ 
+-    def get_imapfilter(self, account):
+-        """Return optional imap filter string.
++    def info(self, msg):
++        self.__logger.info(msg)
+ 
+-        default return value: None
+-        """
+-        try:
+-            return self.__cparser.get(account, self.__IMAPFILTER)
+-        except:
+-            return None
++    def warn(self, msg):
++        self.__logger.warn(msg)
++    
++    def error(self, msg):
++        self.__logger.error(msg)
+ 
+-    def use_imapssl(self, account):
+-        """Return True or False for optional parameter 'imapssl'.
++    def critical(self, msg):
++        self.__logger.critical(msg)
++        sys.exit()
+ 
+-        default return value: True
+-        """
+-        try:
+-            if str.lower(self.__cparser.get(account, self.__IMAPSSL)) == 'false':
+-                return False
+-            else:
+-                return True
+-        except:
+-            return True
++# create singleton
++Log = Log()
+ 
++
++# ----------------------------------------------------------------------------
+ class Utils:
++    def __call__(self):
++        return self
++
+     def __init__(self):
+         self.__regex_from = re.compile('^from: .*$', re.IGNORECASE)
+         self.__regex_to = re.compile('^to: .*$', re.IGNORECASE)
+@@ -188,6 +173,7 @@
+             aux += 'T'
+         if self.message_draft(flags):
+             aux += 'D'
++        Log().debug('flags: %s --> aux: %s' % (flags, aux))
+         if len(aux) > 0:
+             aux = ',' + aux
+         return aux
+@@ -203,7 +189,137 @@
+     def message_draft(self, flags):
+         return self.__regex_msg_draft.match(flags)
+ 
++# create singleton
++Utils = Utils()
+ 
++
++# ----------------------------------------------------------------------------
++class Configuration:
++    def __init__(self, cfiles):
++        self.__IMAPHOST = 'imapserver'
++        self.__IMAPPORT = 'imapport'
++        self.__IMAPUSER = 'imapuser'
++        self.__IMAPPASSWORD = 'imappassword'
++        self.__IMAPFILTER = 'imapfilter'
++        self.__IMAPSSL = 'imapssl'
++        self.__MAILDIR = 'maildir'
++        self.__LOGGER = 'logger'
++        self.__LOGFILE = 'logfile'
++        self.__LOGLEVEL = 'loglevel'
++        
++        self.__cparser = ConfigParser.ConfigParser()
++
++        if type(cfiles) != types.ListType: cfiles = [cfiles]
++        def expand_user(path): return os.path.expanduser(path)
++
++        Log().debug('config files: %s' % map(expand_user, cfiles))
++        self.__cparser.read(map(expand_user, cfiles))
++
++    def get_accounts(self):
++        """Return list of all accounts.
++        """
++        return self.__cparser.sections()
++
++    def get_host(self, account):
++        """Return imap host.
++        """
++        try:
++            return self.__cparser.get(account, self.__IMAPHOST)
++        except:
++            Log().critical('host for account %s not configured!' % account)
++
++    def get_port(self, account):
++        """Return optional parameter imap port.
++
++        default return value: 993
++        """
++        try:
++            return int(self.__cparser.get(account, self.__IMAPPORT))
++        except:
++            return 993
++
++    def get_username(self, account):
++        """Return imap username.
++        """
++        try:
++            return self.__cparser.get(account, self.__IMAPUSER)
++        except:
++            Log().critical('username for account %s not configured!' % account)
++
++    def get_password(self, account):
++        """Return imap password.
++        """
++        try:
++            return self.__cparser.get(account, self.__IMAPPASSWORD)
++        except:
++            Log().critical('password for account %s not configured!' % account)
++
++    def get_maildir(self, account):
++        """Return maildir path.
++        """
++        try:
++            return self.__cparser.get(account, self.__MAILDIR)
++        except:
++            Log().critical('maildir for account %s not configured!' % account)
++
++    def get_imapfilter(self, account):
++        """Return optional imap filter string.
++
++        default return value: None
++        """
++        try:
++            return self.__cparser.get(account, self.__IMAPFILTER)
++        except:
++            return None
++
++    def use_imapssl(self, account):
++        """Return True or False for optional parameter 'imapssl'.
++
++        default return value: True
++        """
++        try:
++            if str.lower(self.__cparser.get(account, self.__IMAPSSL)) == 'false':
++                return False
++            else:
++                return True
++        except:
++            return True
++
++    def get_logger(self, account):
++        """Return optional parameter logger.
++
++        default return value: none
++        """
++        try:
++            return self.__cparser.get(account, self.__LOGGER)
++        except:
++            return 'syslog'
++
++    def get_log_file(self, account):
++        """Return file to log to.
++        """
++        try:
++            return self.__cparser.get(account, self.__LOGFILE)
++        except:
++            Log().critical('logfile for account %s not configured!' % account)
++
++    def get_log_level(self, account):
++        """Return optional parameter log level.
++
++        default return value: logger.ERROR
++        """
++        try:
++            lvl = str.lower(self.__cparser.get(account, self.__LOGLEVEL))
++            if lvl == 'debug': return logging.DEBUG
++            elif lvl == 'info': return logging.INFO
++            elif lvl == 'warning': return logging.WARNING
++            elif lvl == 'error': return logging.ERROR
++            elif lvl == 'critical': return logging.CRITICAL
++        except:
++            return logging.ERROR
++
++# ----------------------------------------------------------------------------
++class IMAPException(Exception): pass
+ class IMAP:
+     def __init__(self, host=None, port=None, user=None, password=None, ssl=True):
+         self.__connection = None
+@@ -224,7 +340,7 @@
+                 self.__connection = imaplib.IMAP4(host, port)
+             self.__connection.login(user, password)
+         except Exception, e:
+-            error('can not connect to \'%s:%d\': %s' % (host, port, str(e)))
++            raise IMAPException('can not connect to \'%s:%d\': %s' % (host, port, str(e)))
+ 
+     def __check_connection(self):
+         """Check the imap connection.
+@@ -235,9 +351,8 @@
+             self.__connection.noop()
+         except:
+             # something went wrong
+-            error('not connected to server!')
++            raise IMAPException('not connected to server!')
+ 
+-
+     def get_folders(self, filter=None):
+         """Return a list with all imap folders.
+         """
+@@ -248,10 +363,10 @@
+         try:
+             status, flist = self.__connection.list()
+         except Exception, e:
+-            error('can not get folder list: %s' % str(e))
++            raise IMAPException('can not get folder list: %s' % str(e))
+ 
+         if status != 'OK':
+-            warn('imap.list() return: %s' % flist[0])
++            Log().warn('imap.list() return: %s' % flist[0])
+         
+         for fostr in flist:
+             ro = self.__regex_folderstr.search(fostr)
+@@ -274,14 +389,13 @@
+         status, mnum_list = self.__connection.search(None, 'ALL')
+         
+         if status != 'OK':
+-            warn('imap.search() return: %s' % flist[0])
++            Log().warn('imap.search() return: %s' % flist[0])
+ 
+-        utils = Utils()
+         uid_list = {}
+         for mnum in mnum_list[0].split():
+             status, data = self.__connection.fetch(mnum, '(UID BODY.PEEK[HEADER])')
+             uid = self.__regex_uid.search(data[0][0]).group(1)
+-            hd = utils.hash_message_header(data[0][1]).hexdigest()
++            hd = Utils().hash_message_header(data[0][1]).hexdigest()
+             uid_list[uid] = hd
+ 
+         return uid_list
+@@ -302,13 +416,15 @@
+         status, mnum = self.__connection.search(None, 'UID', str(uid))
+         
+         if status != 'OK':
+-            warn('imap.search() return: %s' % flist[0])
++            Log().warn('imap.search() return: %s' % flist[0])
+ 
+         status, data = self.__connection.fetch(mnum[0], '(FLAGS BODY.PEEK[])')
+         flags = self.__regex_flags.search(data[0][0]).group(1)
+         return [flags, data[0][1]]
+ 
+ 
++# ----------------------------------------------------------------------------
++class MaildirException(Exception): pass
+ class Maildir:
+     def __init__(self, basedir=None, create=False):
+         self.__basedir=''
+@@ -323,10 +439,17 @@
+         maildir will be created.
+         """
+         self.__basedir = os.path.expanduser(basedir)
+-        if create == True:
+-            if not os.path.isdir(self.__basedir):
+-                os.mkdir(self.__basedir)
++        try:
++            if create == True:
++                if not os.path.isdir(self.__basedir):
++                    os.mkdir(self.__basedir)
++        except Exception, e:
++            raise MaildirException('can not create basedir \'%s\': %s' % (self.__basedir, e))
+ 
++        # raise an exception, if basedir does not exist
++        if not os.path.isdir(self.__basedir):
++            raise MaildirException('basedir \'%s\' does not exist' % self.__basedir)
++
+         self.__index_messages()
+ 
+ 
+@@ -360,21 +483,23 @@
+         if not folder.startswith(self.__basedir):
+             folder = os.path.join(self.__basedir, folder)
+             
+-        utils = Utils()
+-        fname = utils.gen_filename()
++        fname = Utils().gen_filename()
+         fname_tmp = os.path.join(folder, 'tmp', fname)
+ 
+-        if utils.message_seen(flags):
+-            fname_dst = os.path.join(folder, 'cur', fname + utils.gen_filename_aux(flags))
++        if Utils().message_seen(flags):
++            fname_dst = os.path.join(folder, 'cur', fname + Utils().gen_filename_aux(flags))
+         else:
+             fname_dst = os.path.join(folder, 'new', fname)
+ 
+-        fd = open(fname_tmp, 'w')
+-        fd.write(message)
+-        fd.close()
++        try:
++            fd = open(fname_tmp, 'w')
++            fd.write(message)
++            fd.close()
++        except Exception, e:
++            raise MaildirException('can not write message \'%s\'' % fname_tmp)
+ 
+         os.rename(fname_tmp, fname_dst)
+-        info('[Maildir] write message "%s"' % fname_dst)
++        Log().debug('write message "%s"' % fname_dst)
+ 
+ 
+     def remove_from_index(self, folder, hd):
+@@ -388,48 +513,67 @@
+             if self.__sha1_header_cache[folder].has_key(hd):
+                 del self.__sha1_header_cache[folder][hd]
+ 
+-    def get_leftover_messages(self):
+-        """Return file names, which are leftover from updating.
++    def remove_leftover_messages(self):
++        """Remove files, which are leftover from updating.
+         """
+-        ret = []
+         for i in self.__sha1_header_cache.keys():
+             for j in self.__sha1_header_cache[i].keys():
+                 for f in self.__sha1_header_cache[i][j]:
+-                    ret.append(os.path.join(i, f))
+-        return ret
++                    os.remove(os.path.join(i, f))
++                    Log().debug('remove message "%s"' % os.path.join(i, f))
+ 
++    def __is_maildir_folder(self, folder):
++        """Return True if the folder is a maildir folder.
++
++        Test if the folder contains the three folders 'new',
++        'cur' and 'tmp'.
++        """
++        if not folder.startswith(self.__basedir):
++            folder = os.path.join(self.__basedir, folder)
++        return os.path.isdir(os.path.join(folder, 'new')) and \
++               os.path.isdir(os.path.join(folder, 'cur')) and \
++               os.path.isdir(os.path.join(folder, 'tmp'))
++
+     def __get_folder_list(self, folder=None):
++        """Return a list of valid mail folders.
++        """
+         if folder == None: folder = self.__basedir
+         if not folder.startswith(self.__basedir):
+             folder = os.path.join(self.__basedir, folder)
+ 
+         flist = [folder]
+-        for i in os.listdir(folder):
+-            if os.path.isdir(os.path.join(folder,i)) and i[0] == '.':
+-                flist.append(os.path.join(folder,i))
++        for fo in os.listdir(folder):
++            if os.path.isdir(os.path.join(folder,fo)) and self.__is_maildir_folder(fo):
++                flist.append(os.path.join(folder,fo))
+ 
+         return flist
+ 
+ 
+     def __get_message_list(self, folder):
++        """Return a list of mail filenames for the given folder.
++        """
+         mlist = []
+ 
+         if folder == None: folder = self.__basedir
+         if not folder.startswith(self.__basedir):
+             folder = os.path.join(self.__basedir, folder)
+ 
+-        for mdfolder in ['new', 'cur', 'tmp']:
+-            if os.path.isdir(os.path.join(folder, mdfolder)):
+-                for i in os.listdir(os.path.join(folder, mdfolder)):
+-                    if os.path.isfile(os.path.join(folder, mdfolder, i)):
+-                        mlist.append([mdfolder, i])
++        try:
++            for mdfolder in ['new', 'cur', 'tmp']:
++                if os.path.isdir(os.path.join(folder, mdfolder)):
++                    for i in os.listdir(os.path.join(folder, mdfolder)):
++                        if os.path.isfile(os.path.join(folder, mdfolder, i)):
++                            mlist.append([mdfolder, i])
++        except Exception, e:
++            raise MaildirException('can not get message list for folder \'%s\': %s' % (folder, e))
+         return mlist
+ 
+ 
+     def __index_messages(self, folder=None):
++        """Index all messages in the maildir.
++        """
+         ret = {}
+ 
+-        utils = Utils()
+         for foname in self.__get_folder_list(folder):
+             foname = foname.rstrip('/')
+             self.__sha1_header_cache[foname]={}
+@@ -438,15 +582,18 @@
+                 sfname = os.path.join(fname[0], fname[1])
+ 
+                 lines = ''
+-                file = open(rfname, 'r')
+-                # only get header
+-                for line in file:
+-                    if len(line) <= 2:
+-                        break
+-                    lines += line
+-                file.close()
++                try:
++                    file = open(rfname, 'r')
++                    # only get header
++                    for line in file:
++                        if len(line) <= 2:
++                            break
++                        lines += line
++                    file.close()
++                except Exception, e:
++                    raise MaildirException('can not index message \'%s\': ' % (rfname, e))
+ 
+-                hd = utils.hash_message_header(lines).hexdigest()
++                hd = Utils().hash_message_header(lines).hexdigest()
+                 if self.__sha1_header_cache[foname].has_key(hd):
+                     self.__sha1_header_cache[foname][hd].append(sfname)
+                 else:
+@@ -475,59 +622,80 @@
+             os.mkdir(os.path.join(folder, 'new'))
+             ret = True
+         if ret:
+-            info('[Maildir] create folder "%s"' % folder)
++            Log().debug('create folder "%s"' % folder)
+         return ret
+ 
++
++# ----------------------------------------------------------------------------
+ class Worker:
+     def __init__(self, config):
+         self.__config = config
+ 
++    def __config_logger(self, account):
++        Log().remove_all_handlers()
++        for logger in self.__config.get_logger(account).split(', '):
++            if str.lower(logger) == 'syslog':
++                Log().log_to_syslog()
++            elif str.lower(logger) == 'file':
++                Log().log_to_file(self.__config.get_log_file(account))
++        Log().set_log_level(self.__config.get_log_level(account))
++
+     def backup_all(self):
+         for account in self.__config.get_accounts():
++            self.__config_logger(account)
+             self.backup(account)
+ 
+     def list_imap_folders(self, account):
+-        imap = IMAP(self.__config.get_host(account),
+-                    self.__config.get_port(account),
+-                    self.__config.get_username(account),
+-                    self.__config.get_password(account),
+-                    self.__config.use_imapssl(account))
++        try:
++            self.__config_logger(account)
++            imap = IMAP(self.__config.get_host(account),
++                        self.__config.get_port(account),
++                        self.__config.get_username(account),
++                        self.__config.get_password(account),
++                        self.__config.use_imapssl(account))
+ 
+-        filter = self.__config.get_imapfilter(account)
+-        for folder in imap.get_folders(filter):
+-            print '-> %s' % folder
++            filter = self.__config.get_imapfilter(account)
++            for folder in imap.get_folders(filter):
++                print '-> %s' % folder
++        except IMAPException, e:
++            Log().error('imap error: ' % e)
++        except:
++            Log().error('error: ' % e)
+ 
+     def backup(self, account):
+-        utils = Utils()
+-        
+-        maildir = Maildir(self.__config.get_maildir(account), True)
+-        imap = IMAP(self.__config.get_host(account),
+-                    self.__config.get_port(account),
+-                    self.__config.get_username(account),
+-                    self.__config.get_password(account))
+-        
+-        fo_filter = self.__config.get_imapfilter(account)
+-        for folder in imap.get_folders(fo_filter):
+-            # create folder if needed
+-            cf = maildir.create_folder(folder)
+-        
+-            mlist = imap.get_messages(folder)
+-            for uid, hhd in mlist.iteritems():
+-                has_msg = maildir.has_message_header(folder, hhd)
+-                if cf or not has_msg:
+-                    # folder was newly created and header not in maildir index
+-                    # so save message
+-                    flags, body = imap.get_message(folder, uid)
+-                    maildir.write_message(folder, body, flags)
+-                else:
+-                    maildir.remove_from_index(folder, hhd)
++        try:
++            maildir = Maildir(self.__config.get_maildir(account), True)
++            imap = IMAP(self.__config.get_host(account),
++                        self.__config.get_port(account),
++                        self.__config.get_username(account),
++                        self.__config.get_password(account))
++            
++            fo_filter = self.__config.get_imapfilter(account)
++            for folder in imap.get_folders(fo_filter):
++                # create folder if needed
++                cf = maildir.create_folder(folder)
++            
++                mlist = imap.get_messages(folder)
++                for uid, hhd in mlist.iteritems():
++                    has_msg = maildir.has_message_header(folder, hhd)
++                    if cf or not has_msg:
++                        # folder was newly created and header not in maildir index
++                        # so save message
++                        flags, body = imap.get_message(folder, uid)
++                        maildir.write_message(folder, body, flags)
++                    else:
++                        maildir.remove_from_index(folder, hhd)
+ 
+-        for fname in maildir.get_leftover_messages():
+-            info('[Worker] remove message "%s"' % fname)
+-            os.remove(fname)
++            maildir.remove_leftover_messages()
++        except IMAPException, e:
++            Log().error('imap error: ' % e)
++        except:
++            Log().error('error: ' % e)
+ 
++
++# ----------------------------------------------------------------------------
+ if __name__ == "__main__":
+     cfg = Configuration('~/work/imapbackup/imapbackuprc')
+     w = Worker(cfg)
+-    # w.backup_all()
++    w.backup_all()
+     # w.list_imap_folders('')
+
+
+
+From fire at sheep.berlios.de  Sun May 29 18:43:07 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Sun, 29 May 2005 18:43:07 +0200
+Subject: [Imapbackup-svn] r11 - trunk
+Message-ID: <200505291643.j4TGh7Dd026015@sheep.berlios.de>
+
+Author: fire
+Date: 2005-05-29 18:43:06 +0200 (Sun, 29 May 2005)
+New Revision: 11
+
+Modified:
+   trunk/TODO
+Log:
+update todo list
+
+Modified: trunk/TODO
+===================================================================
+--- trunk/TODO	2005-05-29 16:35:26 UTC (rev 10)
++++ trunk/TODO	2005-05-29 16:43:06 UTC (rev 11)
+@@ -2,12 +2,9 @@
+ | TODO
+ `----
+   - a lot more docu ;)
+-  - -c --config-file   read from given config file
+-  - -l --list-folders  list imap folders
+-  - --log-level        set log level (info, warn, error, none)
+-  - better logging system (debug, info, warn, error)
+-     * no logging
+-     * to stdout
+-     * to syslog
++  - comand line parameter parser
++    - -c --config-file   read from given config file
++    - -l --list-folders  list imap folders
++    - --log-level        set log level (info, warn, error, none)
+   - maildir write should move existing file from 'new' to 'cur' and
+     fix flags in the filename
+
+
+
+From fire at sheep.berlios.de  Tue May 31 23:38:06 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Tue, 31 May 2005 23:38:06 +0200
+Subject: [Imapbackup-svn] r12 - trunk
+Message-ID: <200505312138.j4VLc6cf002414@sheep.berlios.de>
+
+Author: fire
+Date: 2005-05-31 23:38:06 +0200 (Tue, 31 May 2005)
+New Revision: 12
+
+Modified:
+   trunk/TODO
+Log:
+update todo list
+
+Modified: trunk/TODO
+===================================================================
+--- trunk/TODO	2005-05-29 16:43:06 UTC (rev 11)
++++ trunk/TODO	2005-05-31 21:38:06 UTC (rev 12)
+@@ -8,3 +8,5 @@
+     - --log-level        set log level (info, warn, error, none)
+   - maildir write should move existing file from 'new' to 'cur' and
+     fix flags in the filename
++  - add threading
++  - remove maildir directories, which are deleted in the imap box
+
+
+
+From fire at sheep.berlios.de  Tue May 31 23:39:08 2005
+From: fire at sheep.berlios.de (Rico Schiekel at BerliOS)
+Date: Tue, 31 May 2005 23:39:08 +0200
+Subject: [Imapbackup-svn] r13 - trunk
+Message-ID: <200505312139.j4VLd81n002450@sheep.berlios.de>
+
+Author: fire
+Date: 2005-05-31 23:39:08 +0200 (Tue, 31 May 2005)
+New Revision: 13
+
+Modified:
+   trunk/imapbackup.py
+Log:
+extend class 'Worker' to parse command line parameters.
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-05-31 21:38:06 UTC (rev 12)
++++ trunk/imapbackup.py	2005-05-31 21:39:08 UTC (rev 13)
+@@ -29,6 +29,7 @@
+ import re
+ import ConfigParser
+ import logging, logging.handlers
++import getopt
+ 
+ message_deliver_count = 0
+ 
+@@ -628,10 +629,58 @@
+ 
+ # ----------------------------------------------------------------------------
+ class Worker:
+-    def __init__(self, config):
+-        self.__config = config
++    def __init__(self):
++        self.__config = None
++        self.__config_file = '~/.imapbackuprc'
++        self.__list_folders = False
++        self.__account = 'all'
+ 
++        self.__parse_cmdl()
++        self.__init_config()
++
++    def __show_syntax(self):
++        print('imapbackup.py [options]')
++        print('   options:')
++        print('     -h --help            print this message')
++        print('     -a --account         select an account (def: all)')
++        print('     -c --config-file     use another config file (def: ~/.imapbackuprc)')
++        print('     -l --list-folders    list folders in selected accounts')
++
++    def __parse_cmdl(self):
++        """
++        """
++        try:
++            opts, args = getopt.getopt(sys.argv[1:], \
++                "ha:c:l:", \
++                ["help", "account=", "config-file=", "list-folders"])
++        except getopt.GetoptError, e:
++            print('error: %s' % e)
++            self.__show_syntax()
++            sys.exit(2)
++        for opt, arg in opts:
++            if opt in ("-h", "--help"):
++                self.__show_syntax()
++                sys.exit(3)
++            elif opt in ("-a", "--account"):
++                self.__account = arg
++            elif opt in ("-c", "--config-file"):
++                self.__config_file = arg
++            elif opt in ("-l", "--list-folders"):
++                self.__list_folders = True
++
++    def __init_config(self):
++        """Initialize the configuration.
++        """
++        self.__config_file = os.path.expanduser(self.__config_file)
++        if os.path.isfile(self.__config_file):
++            self.__config = Configuration(self.__config_file)
++        else:
++            print('can not open config file: %s' % self.__config_file)
++            sys.exit(-1)
++
+     def __config_logger(self, account):
++        """Configures the logger singelton for the given account.
++        """
+         Log().remove_all_handlers()
+         for logger in self.__config.get_logger(account).split(', '):
+             if str.lower(logger) == 'syslog':
+@@ -640,10 +689,21 @@
+                 Log().log_to_file(self.__config.get_log_file(account))
+         Log().set_log_level(self.__config.get_log_level(account))
+ 
+-    def backup_all(self):
++    def run(self):
++        if self.__list_folders:
++            if str.lower(self.__account) == 'all':
++                self.list_all_imap_folders()
++            else:
++                self.list_imap_folders(self.__account)
++        else:
++            if str.lower(self.__account) == 'all':
++                self.backup_all()
++            else:
++                self.backup(self.__account)
++
++    def list_all_imap_folders(self):
+         for account in self.__config.get_accounts():
+-            self.__config_logger(account)
+-            self.backup(account)
++            self.list_imap_folders(account)
+ 
+     def list_imap_folders(self, account):
+         try:
+@@ -655,15 +715,22 @@
+                         self.__config.use_imapssl(account))
+ 
+             filter = self.__config.get_imapfilter(account)
++            print('[%s]' % account)
+             for folder in imap.get_folders(filter):
+                 print '-> %s' % folder
++            print
+         except IMAPException, e:
+             Log().error('imap error: ' % e)
+-        except:
++        except Exception, e:
+             Log().error('error: ' % e)
+ 
++    def backup_all(self):
++        for account in self.__config.get_accounts():
++            self.backup(account)
++
+     def backup(self, account):
+         try:
++            self.__config_logger(account)
+             maildir = Maildir(self.__config.get_maildir(account), True)
+             imap = IMAP(self.__config.get_host(account),
+                         self.__config.get_port(account),
+@@ -689,13 +756,10 @@
+             maildir.remove_leftover_messages()
+         except IMAPException, e:
+             Log().error('imap error: ' % e)
+-        except:
++        except Exception, e:
+             Log().error('error: ' % e)
+ 
+ 
+ # ----------------------------------------------------------------------------
+ if __name__ == "__main__":
+-    cfg = Configuration('~/work/imapbackup/imapbackuprc')
+-    w = Worker(cfg)
+-    w.backup_all()
+-    # w.list_imap_folders('')
++    Worker().run()
+
+
+

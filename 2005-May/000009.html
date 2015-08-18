@@ -1,0 +1,208 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Imapbackup-svn] r13 - trunk
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/imapbackup-svn/2005-May/index.html" >
+   <LINK REL="made" HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r13%20-%20trunk&In-Reply-To=%3C200505312139.j4VLd81n002450%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000008.html">
+   
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Imapbackup-svn] r13 - trunk</H1>
+    <B>Rico Schiekel at BerliOS</B> 
+    <A HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r13%20-%20trunk&In-Reply-To=%3C200505312139.j4VLd81n002450%40sheep.berlios.de%3E"
+       TITLE="[Imapbackup-svn] r13 - trunk">fire at sheep.berlios.de
+       </A><BR>
+    <I>Tue May 31 23:39:08 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000008.html">[Imapbackup-svn] r12 - trunk
+</A></li>
+        
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#9">[ date ]</a>
+              <a href="thread.html#9">[ thread ]</a>
+              <a href="subject.html#9">[ subject ]</a>
+              <a href="author.html#9">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: fire
+Date: 2005-05-31 23:39:08 +0200 (Tue, 31 May 2005)
+New Revision: 13
+
+Modified:
+   trunk/imapbackup.py
+Log:
+extend class 'Worker' to parse command line parameters.
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-05-31 21:38:06 UTC (rev 12)
++++ trunk/imapbackup.py	2005-05-31 21:39:08 UTC (rev 13)
+@@ -29,6 +29,7 @@
+ import re
+ import ConfigParser
+ import logging, logging.handlers
++import getopt
+ 
+ message_deliver_count = 0
+ 
+@@ -628,10 +629,58 @@
+ 
+ # ----------------------------------------------------------------------------
+ class Worker:
+-    def __init__(self, config):
+-        self.__config = config
++    def __init__(self):
++        self.__config = None
++        self.__config_file = '~/.imapbackuprc'
++        self.__list_folders = False
++        self.__account = 'all'
+ 
++        self.__parse_cmdl()
++        self.__init_config()
++
++    def __show_syntax(self):
++        print('imapbackup.py [options]')
++        print('   options:')
++        print('     -h --help            print this message')
++        print('     -a --account         select an account (def: all)')
++        print('     -c --config-file     use another config file (def: ~/.imapbackuprc)')
++        print('     -l --list-folders    list folders in selected accounts')
++
++    def __parse_cmdl(self):
++        &quot;&quot;&quot;
++        &quot;&quot;&quot;
++        try:
++            opts, args = getopt.getopt(sys.argv[1:], \
++                &quot;ha:c:l:&quot;, \
++                [&quot;help&quot;, &quot;account=&quot;, &quot;config-file=&quot;, &quot;list-folders&quot;])
++        except getopt.GetoptError, e:
++            print('error: %s' % e)
++            self.__show_syntax()
++            sys.exit(2)
++        for opt, arg in opts:
++            if opt in (&quot;-h&quot;, &quot;--help&quot;):
++                self.__show_syntax()
++                sys.exit(3)
++            elif opt in (&quot;-a&quot;, &quot;--account&quot;):
++                self.__account = arg
++            elif opt in (&quot;-c&quot;, &quot;--config-file&quot;):
++                self.__config_file = arg
++            elif opt in (&quot;-l&quot;, &quot;--list-folders&quot;):
++                self.__list_folders = True
++
++    def __init_config(self):
++        &quot;&quot;&quot;Initialize the configuration.
++        &quot;&quot;&quot;
++        self.__config_file = os.path.expanduser(self.__config_file)
++        if os.path.isfile(self.__config_file):
++            self.__config = Configuration(self.__config_file)
++        else:
++            print('can not open config file: %s' % self.__config_file)
++            sys.exit(-1)
++
+     def __config_logger(self, account):
++        &quot;&quot;&quot;Configures the logger singelton for the given account.
++        &quot;&quot;&quot;
+         Log().remove_all_handlers()
+         for logger in self.__config.get_logger(account).split(', '):
+             if str.lower(logger) == 'syslog':
+@@ -640,10 +689,21 @@
+                 Log().log_to_file(self.__config.get_log_file(account))
+         Log().set_log_level(self.__config.get_log_level(account))
+ 
+-    def backup_all(self):
++    def run(self):
++        if self.__list_folders:
++            if str.lower(self.__account) == 'all':
++                self.list_all_imap_folders()
++            else:
++                self.list_imap_folders(self.__account)
++        else:
++            if str.lower(self.__account) == 'all':
++                self.backup_all()
++            else:
++                self.backup(self.__account)
++
++    def list_all_imap_folders(self):
+         for account in self.__config.get_accounts():
+-            self.__config_logger(account)
+-            self.backup(account)
++            self.list_imap_folders(account)
+ 
+     def list_imap_folders(self, account):
+         try:
+@@ -655,15 +715,22 @@
+                         self.__config.use_imapssl(account))
+ 
+             filter = self.__config.get_imapfilter(account)
++            print('[%s]' % account)
+             for folder in imap.get_folders(filter):
+                 print '-&gt; %s' % folder
++            print
+         except IMAPException, e:
+             Log().error('imap error: ' % e)
+-        except:
++        except Exception, e:
+             Log().error('error: ' % e)
+ 
++    def backup_all(self):
++        for account in self.__config.get_accounts():
++            self.backup(account)
++
+     def backup(self, account):
+         try:
++            self.__config_logger(account)
+             maildir = Maildir(self.__config.get_maildir(account), True)
+             imap = IMAP(self.__config.get_host(account),
+                         self.__config.get_port(account),
+@@ -689,13 +756,10 @@
+             maildir.remove_leftover_messages()
+         except IMAPException, e:
+             Log().error('imap error: ' % e)
+-        except:
++        except Exception, e:
+             Log().error('error: ' % e)
+ 
+ 
+ # ----------------------------------------------------------------------------
+ if __name__ == &quot;__main__&quot;:
+-    cfg = Configuration('~/work/imapbackup/imapbackuprc')
+-    w = Worker(cfg)
+-    w.backup_all()
+-    # w.list_imap_folders('')
++    Worker().run()
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000008.html">[Imapbackup-svn] r12 - trunk
+</A></li>
+	
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#9">[ date ]</a>
+              <a href="thread.html#9">[ thread ]</a>
+              <a href="subject.html#9">[ subject ]</a>
+              <a href="author.html#9">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/imapbackup-svn">More information about the Imapbackup-svn
+mailing list</a><br>
+</body></html>

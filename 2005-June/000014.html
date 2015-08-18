@@ -1,0 +1,264 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Imapbackup-svn] r18 - trunk
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/imapbackup-svn/2005-June/index.html" >
+   <LINK REL="made" HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r18%20-%20trunk&In-Reply-To=%3C200506061551.j56FpJAL026824%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000013.html">
+   <LINK REL="Next"  HREF="000015.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Imapbackup-svn] r18 - trunk</H1>
+    <B>Rico Schiekel at BerliOS</B> 
+    <A HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r18%20-%20trunk&In-Reply-To=%3C200506061551.j56FpJAL026824%40sheep.berlios.de%3E"
+       TITLE="[Imapbackup-svn] r18 - trunk">fire at sheep.berlios.de
+       </A><BR>
+    <I>Mon Jun  6 17:51:19 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000013.html">[Imapbackup-svn] r17 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000015.html">[Imapbackup-svn] r19 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#14">[ date ]</a>
+              <a href="thread.html#14">[ thread ]</a>
+              <a href="subject.html#14">[ subject ]</a>
+              <a href="author.html#14">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: fire
+Date: 2005-06-06 17:51:16 +0200 (Mon, 06 Jun 2005)
+New Revision: 18
+
+Modified:
+   trunk/imapbackup.py
+Log:
+- add logging to stderr
+- add maildir folder removing
+- simplify header hashing
+- fix bug in maildir index removing
+- fix logging bug in worker
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-06-06 15:50:37 UTC (rev 17)
++++ trunk/imapbackup.py	2005-06-06 15:51:16 UTC (rev 18)
+@@ -31,6 +31,7 @@
+ import logging, logging.handlers
+ import getopt
+ import threading
++import shutil
+ 
+ message_deliver_count = 0
+ 
+@@ -63,6 +64,18 @@
+             self.__logger.removeHandler(h)
+         self.__handlers = []
+ 
++    def log_to_stderr(self, exclusive=False):
++        &quot;&quot;&quot;Make the logger to log to stderr.
++
++        If the parameter 'exclusive' is True, than all other log handlers
++        are removed.
++        &quot;&quot;&quot;
++        if exclusive:
++            self.remove_all_handlers()
++        handler = logging.StreamHandler(sys.stderr)
++        handler.setFormatter(self.__file_formatter)
++        self.__add_handler(handler)
++
+     def log_to_file(self, fname, exclusive=False):
+         &quot;&quot;&quot;Make the logger to log to a file.
+ 
+@@ -115,15 +128,6 @@
+         return self
+ 
+     def __init__(self):
+-        self.__regex_from = re.compile('^from: .*$', re.IGNORECASE)
+-        self.__regex_to = re.compile('^to: .*$', re.IGNORECASE)
+-        self.__regex_subject = re.compile('^subject: .*$', re.IGNORECASE)
+-        self.__regex_msgid = re.compile('^message-id: .*$', re.IGNORECASE)
+-        self.__regex_date = re.compile('^date: .*$', re.IGNORECASE)
+-        self.__regex_received = re.compile('^received: .*$', re.IGNORECASE)
+-        self.__regex_xorgto = re.compile('^x-original-to: .*$', re.IGNORECASE)
+-        self.__regex_delivto = re.compile('^delivered-to: .*$', re.IGNORECASE)
+-        self.__regex_returnpath = re.compile('^return-path: .*$', re.IGNORECASE)
+         self.__regex_msg_seen = re.compile('.*\Seen.*')
+         self.__regex_msg_answerd = re.compile('.*\Answered.*')
+         self.__regex_msg_flagged = re.compile('.*\Flagged.*')
+@@ -139,24 +143,7 @@
+             if len(line) == 0:
+                 # only scan the header
+                 break
+-            if self.__regex_from.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_to.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_subject.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_msgid.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_date.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_received.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_xorgto.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_delivto.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
+-            elif self.__regex_returnpath.search(line):
+-                hd_obj.update(self.__regex_whitespaces.sub('', line))
++            hd_obj.update(self.__regex_whitespaces.sub('', line))
+         return hd_obj
+ 
+     def gen_filename(self):
+@@ -297,7 +284,7 @@
+         try:
+             return self.__cparser.get(account, self.__LOGGER)
+         except:
+-            return 'syslog'
++            return 'stderr'
+ 
+     def get_log_file(self, account):
+         &quot;&quot;&quot;Return file to log to.
+@@ -433,6 +420,7 @@
+     def __init__(self, basedir=None, create=False):
+         self.__basedir=''
+         self.__sha1_header_cache={}
++        self.__touched_folders=[]
+         if basedir:
+             self.open(basedir, create)
+ 
+@@ -470,6 +458,9 @@
+         return False
+ 
+ 
++    def touch_folder(self, folder):
++        self.__touched_folders.append(folder)
++
+     def create_folder(self, folder):
+         &quot;&quot;&quot;Create a new maildir folder.
+ 
+@@ -478,6 +469,7 @@
+         if not folder.startswith(self.__basedir):
+             folder = os.path.join(self.__basedir, folder)
+ 
++        self.touch_folder(folder)
+         return self.__create_folder(folder)
+ 
+ 
+@@ -515,16 +507,28 @@
+ 
+         if self.__sha1_header_cache.has_key(folder):
+             if self.__sha1_header_cache[folder].has_key(hd):
+-                del self.__sha1_header_cache[folder][hd]
++                if len(self.__sha1_header_cache[folder][hd]) &lt;= 1:
++                    # remove complete hash handle
++                    del self.__sha1_header_cache[folder][hd]
++                else:
++                    # remove an entry from hash handle
++                    self.__sha1_header_cache[folder][hd] = self.__sha1_header_cache[folder][hd][1::]
+ 
+-    def remove_leftover_messages(self):
+-        &quot;&quot;&quot;Remove files, which are leftover from updating.
++    def remove_leftover(self):
++        &quot;&quot;&quot;Remove files or directories, which are leftover from updating.
+         &quot;&quot;&quot;
++        # remove all leftover messages
+         for i in self.__sha1_header_cache.keys():
+             for j in self.__sha1_header_cache[i].keys():
+                 for f in self.__sha1_header_cache[i][j]:
+                     os.remove(os.path.join(i, f))
+                     Log().debug('remove message &quot;%s&quot;' % os.path.join(i, f))
++        
++        # remove all leftover directories
++        def f(path): return self.__touched_folders.count(path) == 0
++        for folder in filter(f, self.__sha1_header_cache.keys()):
++            shutil.rmtree(folder)
++            Log().debug('remove folder &quot;%s&quot;' % folder)
+ 
+     def __is_maildir_folder(self, folder):
+         &quot;&quot;&quot;Return True if the folder is a maildir folder.
+@@ -545,7 +549,7 @@
+         if not folder.startswith(self.__basedir):
+             folder = os.path.join(self.__basedir, folder)
+ 
+-        flist = [folder]
++        flist = []
+         for fo in os.listdir(folder):
+             if os.path.isdir(os.path.join(folder,fo)) and self.__is_maildir_folder(fo):
+                 flist.append(os.path.join(folder,fo))
+@@ -690,11 +694,13 @@
+         &quot;&quot;&quot;
+         Log().set_log_level(self.__config.get_log_level(account))
+         Log().remove_all_handlers()
+-        for logger in self.__config.get_logger(account).split(', '):
++        for logger in self.__config.get_logger(account).replace(' ', '').split(','):
+             if str.lower(logger) == 'syslog':
+                 Log().log_to_syslog()
+             elif str.lower(logger) == 'file':
+                 Log().log_to_file(self.__config.get_log_file(account))
++            elif str.lower(logger) == 'stderr':
++                Log().log_to_stderr()
+ 
+     def run(self):
+         if self.__list_folders:
+@@ -770,7 +776,7 @@
+             
+             fo_filter = self.__config.get_imapfilter(account)
+             for folder in imap.get_folders(fo_filter):
+-                # create folder if needed
++                # create and touch folder if needed
+                 cf = maildir.create_folder(folder)
+             
+                 mlist = imap.get_messages(folder)
+@@ -784,11 +790,11 @@
+                     else:
+                         maildir.remove_from_index(folder, hhd)
+ 
+-            maildir.remove_leftover_messages()
++            maildir.remove_leftover()
+         except IMAPException, e:
+-            Log().error('imap error: ' % e)
++            Log().error('imap error: %s' % str(e))
+         except Exception, e:
+-            Log().error('error: ' % e)
++            Log().error('error: %s' % str(e))
+ 
+ 
+ # ----------------------------------------------------------------------------
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000013.html">[Imapbackup-svn] r17 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000015.html">[Imapbackup-svn] r19 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#14">[ date ]</a>
+              <a href="thread.html#14">[ thread ]</a>
+              <a href="subject.html#14">[ subject ]</a>
+              <a href="author.html#14">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/imapbackup-svn">More information about the Imapbackup-svn
+mailing list</a><br>
+</body></html>

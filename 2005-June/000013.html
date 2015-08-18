@@ -1,0 +1,101 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Imapbackup-svn] r17 - trunk
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/imapbackup-svn/2005-June/index.html" >
+   <LINK REL="made" HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r17%20-%20trunk&In-Reply-To=%3C200506061550.j56Fob3J026754%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000012.html">
+   <LINK REL="Next"  HREF="000014.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Imapbackup-svn] r17 - trunk</H1>
+    <B>Rico Schiekel at BerliOS</B> 
+    <A HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r17%20-%20trunk&In-Reply-To=%3C200506061550.j56Fob3J026754%40sheep.berlios.de%3E"
+       TITLE="[Imapbackup-svn] r17 - trunk">fire at sheep.berlios.de
+       </A><BR>
+    <I>Mon Jun  6 17:50:37 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000012.html">[Imapbackup-svn] r16 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000014.html">[Imapbackup-svn] r18 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#13">[ date ]</a>
+              <a href="thread.html#13">[ thread ]</a>
+              <a href="subject.html#13">[ subject ]</a>
+              <a href="author.html#13">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: fire
+Date: 2005-06-06 17:50:37 +0200 (Mon, 06 Jun 2005)
+New Revision: 17
+
+Modified:
+   trunk/imapbackuprc.example
+Log:
+add logging to stderr
+
+Modified: trunk/imapbackuprc.example
+===================================================================
+--- trunk/imapbackuprc.example	2005-06-03 12:52:52 UTC (rev 16)
++++ trunk/imapbackuprc.example	2005-06-06 15:50:37 UTC (rev 17)
+@@ -19,7 +19,7 @@
+ #    - imapport       imap port (default: 993)
+ #    - imapssl        use imap ssl (default: true)
+ #    - imapfilter     filter imap folders (default: no filtering)
+-#    - logger         set logger (default: syslog)
++#    - logger         set logger (default: stderr)
+ #    - logfile        file to log to, if filelogger is select
+ #    - loglevel       set logging level (default: error)
+ #
+@@ -47,7 +47,6 @@
+ 
+ maildir:        ~/Maildir_1
+ 
+-logger:         syslog
+ loglevel:       warn
+ 
+ 
+@@ -62,7 +61,7 @@
+ 
+ maildir:        ~/Maildir_2
+ 
+-logger:         file, syslog
++logger:         file, syslog, stderr
+ logfile:        ~/.imapbackup.log
+ loglevel:       debug
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000012.html">[Imapbackup-svn] r16 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000014.html">[Imapbackup-svn] r18 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#13">[ date ]</a>
+              <a href="thread.html#13">[ thread ]</a>
+              <a href="subject.html#13">[ subject ]</a>
+              <a href="author.html#13">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/imapbackup-svn">More information about the Imapbackup-svn
+mailing list</a><br>
+</body></html>

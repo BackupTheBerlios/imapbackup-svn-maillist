@@ -1,0 +1,319 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Imapbackup-svn] r4 - trunk
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/imapbackup-svn/2005-May/index.html" >
+   <LINK REL="made" HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r4%20-%20trunk&In-Reply-To=%3C200505271326.j4RDQltl030751%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000001.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Imapbackup-svn] r4 - trunk</H1>
+    <B>Rico Schiekel at BerliOS</B> 
+    <A HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r4%20-%20trunk&In-Reply-To=%3C200505271326.j4RDQltl030751%40sheep.berlios.de%3E"
+       TITLE="[Imapbackup-svn] r4 - trunk">fire at sheep.berlios.de
+       </A><BR>
+    <I>Fri May 27 15:26:47 CEST 2005</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000001.html">[Imapbackup-svn] r5 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#0">[ date ]</a>
+              <a href="thread.html#0">[ thread ]</a>
+              <a href="subject.html#0">[ subject ]</a>
+              <a href="author.html#0">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: fire
+Date: 2005-05-27 15:26:46 +0200 (Fri, 27 May 2005)
+New Revision: 4
+
+Added:
+   trunk/TODO
+   trunk/imapbackuprc.example
+Modified:
+   trunk/imapbackup.py
+Log:
+- move todo list to file 'TODO'
+- implement 'Configuration' class
+- create 'imapbackuprc' example file
+
+
+Added: trunk/TODO
+===================================================================
+--- trunk/TODO	2005-05-24 12:46:44 UTC (rev 3)
++++ trunk/TODO	2005-05-27 13:26:46 UTC (rev 4)
+@@ -0,0 +1,7 @@
++,----
++| TODO
++`----
++  - a lot more docu ;)
++  - -c --config-file   read from given config file
++  - -l --list-folders  list imap folders
++  - --log-level        set log level (info, warn, error, none)
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-05-24 12:46:44 UTC (rev 3)
++++ trunk/imapbackup.py	2005-05-27 13:26:46 UTC (rev 4)
+@@ -18,18 +18,11 @@
+ # 
+ # $Id$
+ 
+-# TODO
+-#  - more doku ;)
+-#  - ~/.imapbackuprc    config file
+-#  - -c --config-file   read from given config file
+-#  - -l --list-folders  list imap folders
+-#  - --log-level        set log level (info, warn, error, none)
+-#
+-
+ import os, sys
+ import socket, imaplib
+ import time, sha, types
+ import string, re
++import ConfigParser
+ 
+ verbose = True
+ message_deliver_count = 0
+@@ -44,6 +37,61 @@
+ def error(msg):
+     sys.exit('error: ' + str(msg))
+ 
++class Configuration:
++    def __init__(self, cfiles):
++        self.__HOST = 'host'
++        self.__PORT = 'port'
++        self.__USERNAME = 'username'
++        self.__PASSWORD = 'password'
++        self.__MAILDIR = 'maildir'
++        self.__IMAPFILTER = 'imapfilter'
++        
++        self.__cparser = ConfigParser.ConfigParser()
++
++        if type(cfiles) != types.ListType: cfiles = [cfiles]
++        def expand_user(path): return os.path.expanduser(path)
++
++        self.__cparser.read(map(expand_user, cfiles))
++
++    def get_accounts(self):
++        return self.__cparser.sections()
++
++    def get_host(self, account):
++        try:
++            return self.__cparser.get(account, self.__HOST)
++        except:
++            error('host for account %s not configured!' % account)
++
++    def get_port(self, account):
++        try:
++            return int(self.__cparser.get(account, self.__PORT))
++        except:
++            error('port for account %s not configured!' % account)
++
++    def get_username(self, account):
++        try:
++            return self.__cparser.get(account, self.__USERNAME)
++        except:
++            error('username for account %s not configured!' % account)
++
++    def get_password(self, account):
++        try:
++            return self.__cparser.get(account, self.__PASSWORD)
++        except:
++            error('password for account %s not configured!' % account)
++
++    def get_maildir(self, account):
++        try:
++            return self.__cparser.get(account, self.__MAILDIR)
++        except:
++            error('maildir for account %s not configured!' % account)
++
++    def get_imapfilter(self, account):
++        try:
++            return self.__cparser.get(account, self.__IMAPFILTER)
++        except:
++            return None
++
+ class Utils:
+     def __init__(self):
+         self.__regex_from = re.compile('^from: .*$', re.IGNORECASE)
+@@ -125,12 +173,15 @@
+ 
+ 
+ class IMAP:
+-    def __init__(self):
++    def __init__(self, host=None, port=None, user=None, password=None):
+         self.__connection = None
+         self.__regex_folderstr = re.compile('^\((.*)\) +&quot;(.*)&quot; +&quot;(.*)&quot;$')
+         self.__regex_uid = re.compile('UID (.*) BODY')
+         self.__regex_flags = re.compile('FLAGS (.*) BODY')
+ 
++        if host and port and user and password:
++            self.open(host, port, user, password)
++
+     def open(self, host, port, user, password):
+         &quot;&quot;&quot;Try to open the imap connection.
+         &quot;&quot;&quot;
+@@ -224,11 +275,12 @@
+ 
+ 
+ class Maildir:
+-    def __init__(self):
++    def __init__(self, basedir=None, create=False):
+         self.__basedir=''
+         self.__sha1_header_cache={}
++        if basedir:
++            self.open(basedir, create)
+ 
+-
+     def open(self, basedir, create=False):
+         &quot;&quot;&quot;Open the maildir folder and index all existing messages.
+ 
+@@ -392,42 +444,53 @@
+         return ret
+ 
+ class Worker:
+-    def __init__(self, maildir, imap):
+-        self.__maildir = maildir
+-        self.__imap = imap
++    def __init__(self, config):
++        self.__config = config
+ 
+-    def list_imap_folders(self, filter=None):
+-        for folder in self.__imap.get_folders(filter):
++    def backup_all(self):
++        for account in self.__config.get_accounts():
++            self.backup(account)
++
++    def list_imap_folders(self, account):
++        imap = IMAP(self.__config.get_host(account),
++                    self.__config.get_port(account),
++                    self.__config.get_username(account),
++                    self.__config.get_password(account))
++
++        filter = self.__config.get_imapfilter(account)
++        for folder in imap.get_folders(filter):
+             print '-&gt; %s' % folder
+ 
+-    def backup(self):
++    def backup(self, account):
+         utils = Utils()
+-        for folder in self.__imap.get_folders():
++        
++        maildir = Maildir(self.__config.get_maildir(account), True)
++        imap = IMAP(self.__config.get_host(account),
++                    self.__config.get_port(account),
++                    self.__config.get_username(account),
++                    self.__config.get_password(account))
++        
++        for folder in imap.get_folders():
+             # create folder if needed
+-            cf = self.__maildir.create_folder(folder)
++            cf = maildir.create_folder(folder)
+         
+-            mlist = self.__imap.get_messages(folder)
++            mlist = imap.get_messages(folder)
+             for uid, hhd in mlist.iteritems():
+-                has_msg = self.__maildir.has_message_header(folder, hhd)
++                has_msg = maildir.has_message_header(folder, hhd)
+                 if cf or not has_msg:
+                     # folder was newly created and header not in maildir index
+                     # so save message
+-                    flags, body = self.__imap.get_message(folder, uid)
+-                    self.__maildir.write_message(folder, body, flags)
++                    flags, body = imap.get_message(folder, uid)
++                    maildir.write_message(folder, body, flags)
+                 else:
+-                    self.__maildir.remove_from_index(folder, hhd)
++                    maildir.remove_from_index(folder, hhd)
+ 
+-        for fname in self.__maildir.get_leftover_messages():
++        for fname in maildir.get_leftover_messages():
+             info('[Worker] remove message &quot;%s&quot;' % fname)
+             os.remove(fname)
+ 
+ if __name__ == &quot;__main__&quot;:
+-    md = Maildir()
+-    md.open(sys.argv[1], True)
+-
+-    imap = IMAP()
+-    imap.open('hhhh', 993, 'uuuu', 'pppp')
+-    
+-    w = Worker(md, imap)
+-    # w.backup()
+-    w.list_imap_folders('^INBOX')
++    cfg = Configuration('~/work/imapbackup/imapbackuprc')
++    w = Worker(cfg)
++    w.backup_all()
++    # w.list_imap_folders('')
+
+Added: trunk/imapbackuprc.example
+===================================================================
+--- trunk/imapbackuprc.example	2005-05-24 12:46:44 UTC (rev 3)
++++ trunk/imapbackuprc.example	2005-05-27 13:26:46 UTC (rev 4)
+@@ -0,0 +1,30 @@
++# $Id$
++#
++# this file contains configuration examples for imapbackup.
++#
++# the configuration file consists of sections, led by a 
++# &quot;[section]&quot; header and followed by &quot;name: value&quot; entries.
++# note that leading whitespace is removed from values.
++# lines beginning with &quot;#&quot; or &quot;;&quot; are ignored and may be used
++# to provide comments.
++#
++# imapbackup can handle multiple accounts. each account has a
++# section with a unique name. for each account, the
++#    host, port, user, password, maildir
++# entries must be given. 
++# other entries like imapfilter are optional.
++
++[account 1]
++host: imap.server
++port: 993
++username: username
++password: secret
++maildir: ~/Maildir
++imapfilter: ^INBOX
++
++[account 2]
++host: another.host
++port: 996
++username: username_2
++password: terces
++maildir: ~/Maildir_2
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000001.html">[Imapbackup-svn] r5 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#0">[ date ]</a>
+              <a href="thread.html#0">[ thread ]</a>
+              <a href="subject.html#0">[ subject ]</a>
+              <a href="author.html#0">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/imapbackup-svn">More information about the Imapbackup-svn
+mailing list</a><br>
+</body></html>

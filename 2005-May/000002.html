@@ -1,0 +1,273 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Imapbackup-svn] r6 - trunk
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/imapbackup-svn/2005-May/index.html" >
+   <LINK REL="made" HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r6%20-%20trunk&In-Reply-To=%3C200505271433.j4REXeOi002019%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000001.html">
+   <LINK REL="Next"  HREF="000003.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Imapbackup-svn] r6 - trunk</H1>
+    <B>Rico Schiekel at BerliOS</B> 
+    <A HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r6%20-%20trunk&In-Reply-To=%3C200505271433.j4REXeOi002019%40sheep.berlios.de%3E"
+       TITLE="[Imapbackup-svn] r6 - trunk">fire at sheep.berlios.de
+       </A><BR>
+    <I>Fri May 27 16:33:40 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000001.html">[Imapbackup-svn] r5 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000003.html">[Imapbackup-svn] r7 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#2">[ date ]</a>
+              <a href="thread.html#2">[ thread ]</a>
+              <a href="subject.html#2">[ subject ]</a>
+              <a href="author.html#2">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: fire
+Date: 2005-05-27 16:33:39 +0200 (Fri, 27 May 2005)
+New Revision: 6
+
+Modified:
+   trunk/imapbackup.py
+   trunk/imapbackuprc.example
+Log:
+- add 'imapssl' (bool) optional configuration option
+- rename various config options
+  - update 'Configuration' class
+  - update 'imapbackuprc.example' file
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-05-27 13:54:45 UTC (rev 5)
++++ trunk/imapbackup.py	2005-05-27 14:33:39 UTC (rev 6)
+@@ -39,12 +39,13 @@
+ 
+ class Configuration:
+     def __init__(self, cfiles):
+-        self.__HOST = 'host'
+-        self.__PORT = 'port'
+-        self.__USERNAME = 'username'
+-        self.__PASSWORD = 'password'
++        self.__IMAPHOST = 'imapserver'
++        self.__IMAPPORT = 'imapport'
++        self.__IMAPUSER = 'imapuser'
++        self.__IMAPPASSWORD = 'imappassword'
++        self.__IMAPFILTER = 'imapfilter'
++        self.__IMAPSSL = 'imapssl'
+         self.__MAILDIR = 'maildir'
+-        self.__IMAPFILTER = 'imapfilter'
+         
+         self.__cparser = ConfigParser.ConfigParser()
+ 
+@@ -54,44 +55,75 @@
+         self.__cparser.read(map(expand_user, cfiles))
+ 
+     def get_accounts(self):
++        &quot;&quot;&quot;Return list of all accounts.
++        &quot;&quot;&quot;
+         return self.__cparser.sections()
+ 
+     def get_host(self, account):
++        &quot;&quot;&quot;Return imap host.
++        &quot;&quot;&quot;
+         try:
+-            return self.__cparser.get(account, self.__HOST)
++            return self.__cparser.get(account, self.__IMAPHOST)
+         except:
+             error('host for account %s not configured!' % account)
+ 
+     def get_port(self, account):
++        &quot;&quot;&quot;Return optional imap port.
++
++        default return value: 993
++        &quot;&quot;&quot;
+         try:
+-            return int(self.__cparser.get(account, self.__PORT))
++            return int(self.__cparser.get(account, self.__IMAPPORT))
+         except:
+-            error('port for account %s not configured!' % account)
++            return 993
+ 
+     def get_username(self, account):
++        &quot;&quot;&quot;Return imap username.
++        &quot;&quot;&quot;
+         try:
+-            return self.__cparser.get(account, self.__USERNAME)
++            return self.__cparser.get(account, self.__IMAPUSER)
+         except:
+             error('username for account %s not configured!' % account)
+ 
+     def get_password(self, account):
++        &quot;&quot;&quot;Return imap password.
++        &quot;&quot;&quot;
+         try:
+-            return self.__cparser.get(account, self.__PASSWORD)
++            return self.__cparser.get(account, self.__IMAPPASSWORD)
+         except:
+             error('password for account %s not configured!' % account)
+ 
+     def get_maildir(self, account):
++        &quot;&quot;&quot;Return maildir path.
++        &quot;&quot;&quot;
+         try:
+             return self.__cparser.get(account, self.__MAILDIR)
+         except:
+             error('maildir for account %s not configured!' % account)
+ 
+     def get_imapfilter(self, account):
++        &quot;&quot;&quot;Return optional imap filter string.
++
++        default return value: None
++        &quot;&quot;&quot;
+         try:
+             return self.__cparser.get(account, self.__IMAPFILTER)
+         except:
+             return None
+ 
++    def use_imapssl(self, account):
++        &quot;&quot;&quot;Return True or False for optional parameter 'imapssl'.
++
++        default return value: True
++        &quot;&quot;&quot;
++        try:
++            if str.lower(self.__cparser.get(account, self.__IMAPSSL)) == 'false':
++                return False
++            else:
++                return True
++        except:
++            return True
++
+ class Utils:
+     def __init__(self):
+         self.__regex_from = re.compile('^from: .*$', re.IGNORECASE)
+@@ -173,20 +205,23 @@
+ 
+ 
+ class IMAP:
+-    def __init__(self, host=None, port=None, user=None, password=None):
++    def __init__(self, host=None, port=None, user=None, password=None, ssl=True):
+         self.__connection = None
+         self.__regex_folderstr = re.compile('^\((.*)\) +&quot;(.*)&quot; +&quot;(.*)&quot;$')
+         self.__regex_uid = re.compile('UID (.*) BODY')
+         self.__regex_flags = re.compile('FLAGS (.*) BODY')
+ 
+         if host and port and user and password:
+-            self.open(host, port, user, password)
++            self.open(host, port, user, password, ssl)
+ 
+-    def open(self, host, port, user, password):
++    def open(self, host, port, user, password, ssl=True):
+         &quot;&quot;&quot;Try to open the imap connection.
+         &quot;&quot;&quot;
+         try:
+-            self.__connection = imaplib.IMAP4_SSL(host, port)
++            if ssl:
++                self.__connection = imaplib.IMAP4_SSL(host, port)
++            else:
++                self.__connection = imaplib.IMAP4(host, port)
+             self.__connection.login(user, password)
+         except Exception, e:
+             error('can not connect to \'%s:%d\': %s' % (host, port, str(e)))
+@@ -455,7 +490,8 @@
+         imap = IMAP(self.__config.get_host(account),
+                     self.__config.get_port(account),
+                     self.__config.get_username(account),
+-                    self.__config.get_password(account))
++                    self.__config.get_password(account),
++                    self.__config.use_imapssl(account))
+ 
+         filter = self.__config.get_imapfilter(account)
+         for folder in imap.get_folders(filter):
+@@ -492,5 +528,5 @@
+ if __name__ == &quot;__main__&quot;:
+     cfg = Configuration('~/work/imapbackup/imapbackuprc')
+     w = Worker(cfg)
+-    w.backup_all()
++    # w.backup_all()
+     # w.list_imap_folders('')
+
+Modified: trunk/imapbackuprc.example
+===================================================================
+--- trunk/imapbackuprc.example	2005-05-27 13:54:45 UTC (rev 5)
++++ trunk/imapbackuprc.example	2005-05-27 14:33:39 UTC (rev 6)
+@@ -10,21 +10,28 @@
+ #
+ # imapbackup can handle multiple accounts. each account has a
+ # section with a unique name. for each account, the
+-#    host, port, user, password, maildir
++#    - imapserver     imap server
++#    - imapuser       imap user
++#    - imappassword   imap password
++#    - maildir        path to the maildir
+ # entries must be given. 
+-# other entries like imapfilter are optional.
++# other entries are optional:
++#    - imapport       imap port (default: 993)
++#    - imapssl        use imap ssl (default: true)
++#    - imapfilter     filter imap folders (default: no filtering)
+ 
+ [account 1]
+-host: imap.server
+-port: 993
+-username: username
+-password: secret
+-maildir: ~/Maildir
+-imapfilter: ^INBOX
++imapserver:     imap.server
++imapuser:       username
++imappassword:   secret
++imapfilter:     ^INBOX
++maildir:        ~/Maildir_1
+ 
+-[account 2]
+-host: another.host
+-port: 996
+-username: username_2
+-password: terces
+-maildir: ~/Maildir_2
++[account 2 (outbox only)]
++imapserver:     another.server
++imapport:       143
++imapuser:       username_2
++imappassword:   terces
++imapssl:        false
++imapfilter:     outbox
++maildir:        ~/Maildir_2
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000001.html">[Imapbackup-svn] r5 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000003.html">[Imapbackup-svn] r7 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#2">[ date ]</a>
+              <a href="thread.html#2">[ thread ]</a>
+              <a href="subject.html#2">[ subject ]</a>
+              <a href="author.html#2">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/imapbackup-svn">More information about the Imapbackup-svn
+mailing list</a><br>
+</body></html>

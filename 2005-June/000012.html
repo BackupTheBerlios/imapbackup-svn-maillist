@@ -1,0 +1,184 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Imapbackup-svn] r16 - trunk
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/imapbackup-svn/2005-June/index.html" >
+   <LINK REL="made" HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r16%20-%20trunk&In-Reply-To=%3C200506031252.j53CqqO2012429%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000011.html">
+   <LINK REL="Next"  HREF="000013.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Imapbackup-svn] r16 - trunk</H1>
+    <B>Rico Schiekel at BerliOS</B> 
+    <A HREF="mailto:imapbackup-svn%40lists.berlios.de?Subject=Re%3A%20%5BImapbackup-svn%5D%20r16%20-%20trunk&In-Reply-To=%3C200506031252.j53CqqO2012429%40sheep.berlios.de%3E"
+       TITLE="[Imapbackup-svn] r16 - trunk">fire at sheep.berlios.de
+       </A><BR>
+    <I>Fri Jun  3 14:52:52 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000011.html">[Imapbackup-svn] r15 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000013.html">[Imapbackup-svn] r17 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#12">[ date ]</a>
+              <a href="thread.html#12">[ thread ]</a>
+              <a href="subject.html#12">[ subject ]</a>
+              <a href="author.html#12">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: fire
+Date: 2005-06-03 14:52:52 +0200 (Fri, 03 Jun 2005)
+New Revision: 16
+
+Modified:
+   trunk/imapbackup.py
+Log:
+- fix log formaters
+- add command line parameter --threads
+- add account based threading support
+
+
+Modified: trunk/imapbackup.py
+===================================================================
+--- trunk/imapbackup.py	2005-06-03 12:51:26 UTC (rev 15)
++++ trunk/imapbackup.py	2005-06-03 12:52:52 UTC (rev 16)
+@@ -30,6 +30,7 @@
+ import ConfigParser
+ import logging, logging.handlers
+ import getopt
++import threading
+ 
+ message_deliver_count = 0
+ 
+@@ -40,7 +41,8 @@
+ 
+     def __init__(self):
+         self.__logger = logging.getLogger('imapbackup')
+-        self.__formatter = logging.Formatter('imapbackup: %(message)s')
++        self.__syslog_formatter = logging.Formatter('%(name)s: [%(levelname)s] %(message)s')
++        self.__file_formatter = logging.Formatter('%(asctime)s %(name)s: [%(levelname)s] %(message)s')
+         self.__handlers = []
+ 
+     def __add_handler(self, handler):
+@@ -71,7 +73,7 @@
+             if exclusive:
+                 self.remove_all_handlers()
+             handler = logging.FileHandler(os.path.expanduser(fname))
+-            handler.setFormatter(self.__formatter)
++            handler.setFormatter(self.__file_formatter)
+             self.__add_handler(handler)
+ 
+     def log_to_syslog(self, exclusive=False):
+@@ -84,7 +86,7 @@
+             self.remove_all_handlers()
+         handler = logging.handlers.SysLogHandler(address='/dev/log',\
+             facility=logging.handlers.SysLogHandler.LOG_SYSLOG)
+-        handler.setFormatter(self.__formatter)
++        handler.setFormatter(self.__syslog_formatter)
+         self.__add_handler(handler)
+ 
+     def debug(self, msg):
+@@ -635,6 +637,7 @@
+         self.__config_file = '~/.imapbackuprc'
+         self.__list_folders = False
+         self.__account = 'all'
++        self.__threads = 1
+ 
+         self.__parse_cmdl()
+         self.__init_config()
+@@ -646,6 +649,7 @@
+         print('     -a --account         select an account (def: all)')
+         print('     -c --config-file     use another config file (def: ~/.imapbackuprc)')
+         print('     -l --list-folders    list folders in selected accounts')
++        print('        --threads         number of account handling threads (def: 1)')
+ 
+     def __parse_cmdl(self):
+         &quot;&quot;&quot;
+@@ -653,7 +657,7 @@
+         try:
+             opts, args = getopt.getopt(sys.argv[1:], \
+                 &quot;ha:c:l&quot;, \
+-                [&quot;help&quot;, &quot;account=&quot;, &quot;config-file=&quot;, &quot;list-folders&quot;])
++                [&quot;help&quot;, &quot;account=&quot;, &quot;config-file=&quot;, &quot;list-folders&quot;, &quot;threads=&quot;])
+         except getopt.GetoptError, e:
+             print('error: %s' % e)
+             self.__show_syntax()
+@@ -668,6 +672,8 @@
+                 self.__config_file = arg
+             elif opt in (&quot;-l&quot;, &quot;--list-folders&quot;):
+                 self.__list_folders = True
++            elif opt in (&quot;--threads&quot;):
++                self.__threads = int(arg)
+ 
+     def __init_config(self):
+         &quot;&quot;&quot;Initialize the configuration.
+@@ -726,9 +732,33 @@
+             Log().error('error: ' % e)
+ 
+     def backup_all(self):
+-        for account in self.__config.get_accounts():
+-            self.backup(account)
++        thr_max = self.__threads
++        accounts = self.__config.get_accounts()
++        if len(accounts) &lt; thr_max:
++            thr_max = len(accounts)
+ 
++        # thread class
++        class BackupThread(threading.Thread):
++            def __init__(self, worker, account_list):
++                threading.Thread.__init__(self)
++                self.__worker = worker
++                self.__account_list = account_list
++            def run(self):
++                for account in self.__account_list:
++                    self.__worker.backup(account)
++
++        # start threads
++        btlist = []
++        for thr_idx in range(thr_max):
++            bt = BackupThread(self, accounts[thr_idx::thr_max])
++            bt.start()
++            btlist.append(bt)
++
++        # wait for all threads to finish
++        for bt in btlist:
++            bt.join()
++    
++
+     def backup(self, account):
+         try:
+             self.__config_logger(account)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000011.html">[Imapbackup-svn] r15 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000013.html">[Imapbackup-svn] r17 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#12">[ date ]</a>
+              <a href="thread.html#12">[ thread ]</a>
+              <a href="subject.html#12">[ subject ]</a>
+              <a href="author.html#12">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/imapbackup-svn">More information about the Imapbackup-svn
+mailing list</a><br>
+</body></html>
